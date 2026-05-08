@@ -25,6 +25,7 @@ local ShopManager = {
 	RequestGamepassPurchase = BridgeNet2.ReferenceBridge("RequestGamepassPurchase"),
 
 	PlayerPurchased = Signal.new(),
+	ProductPromptFinished = Signal.new(), -- (player, productId: string, wasPurchased: boolean)
 
 	_toGiftPlayer = {},
 }
@@ -78,6 +79,16 @@ function ShopManager:AttemptProductPurchase(player: Player, id: string, toGift: 
 		return
 	end
 
+	if not productData.ProductId or productData.ProductId <= 0 then
+		warn(`Product '{id}' has no valid Roblox ProductId configured`)
+		NotificationManager.NotifyNormalEvent:Fire(player, {
+			`<font color="#ffd400">{productData.Name}</font> is not available right now.`,
+			nil,
+			"Reject",
+		})
+		return
+	end
+
 	PlayerDataManager:GetPlayerData(player)
 		:andThen(function(playerData)
 			if productData.PurchaseOnce and table.find(playerData.PurchasedOnceProducts or {}, id) then
@@ -91,8 +102,12 @@ function ShopManager:AttemptProductPurchase(player: Player, id: string, toGift: 
 				setupGiftTracking(player, id, toGift)
 			end
 
-			if productData.ProductId then
+			local success, promptError = pcall(function()
 				MarketplaceService:PromptProductPurchase(player, productData.ProductId)
+			end)
+			if not success then
+				warn(`Failed to prompt product purchase '{id}' for {player.Name}: {promptError}`)
+				self.ProductPromptFinished:Fire(player, id, false)
 			end
 		end)
 		:catch(function(error)
@@ -371,8 +386,13 @@ function ShopManager:OnInit()
 		self:_onPurchaseGamepass(...)
 	end)
 
-	MarketplaceService.PromptProductPurchaseFinished:Connect(function(player: Player)
+	MarketplaceService.PromptProductPurchaseFinished:Connect(function(player: Player, productId: number, wasPurchased: boolean)
 		clearGiftTracking(player)
+
+		local productData = Products.GetProductFromProductId(productId)
+		if productData then
+			self.ProductPromptFinished:Fire(player, productData.Id, wasPurchased)
+		end
 	end)
 
 	self.RequestProductPurchase:Connect(function(player: Player, data: { any })

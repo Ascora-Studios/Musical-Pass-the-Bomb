@@ -25,6 +25,14 @@ function UIPulse:Construct()
 	local tweenInfo = TweenInfo.new(pulseDuration, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true)
 	local pulseTween = TweenService:Create(uiScale, tweenInfo, { Scale = pulseScale })
 	pulseTween:Play()
+	self._tween = pulseTween
+end
+
+function UIPulse:Stop()
+	if self._tween then
+		self._tween:Cancel()
+		self._tween = nil
+	end
 end
 
 return UIPulse

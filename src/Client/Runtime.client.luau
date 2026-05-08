@@ -16,6 +16,8 @@ local LoadedComponents = require(Client.Modules.LoadedComponents)
 --
 local PRIORITY_TO_LOAD = {
 	"PlayerDataController",
+	"IntroController",
+	"HudController",
 }
 
 --

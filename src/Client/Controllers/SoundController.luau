@@ -18,6 +18,7 @@ local SoundController = {
 	ReplicateToOthersEvent = BridgeNet2.ReferenceBridge("ReplicateSoundToOthers"),
 
 	_lastPlayedSounds = {},
+	_currentGameMusic = nil,
 	_muted = false,
 }
 
@@ -207,6 +208,44 @@ function SoundController:MuteBGM(toggle: boolean)
 	TweenService:Create(backgroundMusic, TweenInfo.new(1), {
 		Volume = toggle and 0 or 1,
 	}):Play()
+end
+
+-- Turns the game music on or off
+-- @param enabled Whether to enable (true) or disable (false) the game music
+-- @param fadeDuration Optional duration for the volume fade (default: 1)
+function SoundController:ToggleGameMusic(enabled: boolean, fadeDuration: number?)
+	local gameMusic = SoundService:FindFirstChild("GameMusic", true)
+	if not gameMusic then
+		warn("GameMusic Sound Group not found in SoundService")
+		return
+	end
+
+	TweenService:Create(gameMusic, TweenInfo.new(fadeDuration or 1, Enum.EasingStyle.Linear), {
+		Volume = enabled and 1 or 0,
+	}):Play()
+end
+
+function SoundController:SwitchBGM(bgmType: "Game" | "Background", switchDuration: number?)
+	local backgroundMusic = SoundService:FindFirstChild("BackgroundMusic", true)
+	local gameMusic = SoundService:FindFirstChild("GameMusic", true)
+
+	TweenService:Create(backgroundMusic, TweenInfo.new(switchDuration or 1, Enum.EasingStyle.Linear), {
+		Volume = bgmType == "Background" and 1 or 0,
+	}):Play()
+	TweenService:Create(gameMusic, TweenInfo.new(switchDuration or 1, Enum.EasingStyle.Linear), {
+		Volume = bgmType == "Game" and 1 or 0,
+	}):Play()
+end
+
+-- Starts the game music thats gonna be used for the match
+function SoundController:StartGameMusic(name: string)
+	if self._currentGameMusic then
+		self._currentGameMusic:Stop()
+	end
+
+	local gameMusic = SoundService:FindFirstChild(name, true)
+	gameMusic:Play()
+	self._currentGameMusic = gameMusic
 end
 
 function SoundController:OnInit()

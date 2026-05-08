@@ -12,6 +12,8 @@ local Spr = require(Packages.Spr)
 local LPlayer = Players.LocalPlayer
 local PlayerGui = LPlayer.PlayerGui
 
+local Camera = workspace.CurrentCamera
+
 --
 local SoundController
 
@@ -48,11 +50,11 @@ function UIController:OpenFrame(frame: Frame, independent: boolean?)
 
 	-- Setup the effect
 	frame.Position = frame:GetAttribute("OrigPosition") + UDim2.fromScale(0, 0.1)
-	uiScale.Scale = 0.95
+	uiScale.Scale = 0.97
 
 	-- Start the effect
-	Spr.target(uiScale, 0.45, 5, { Scale = 1 })
-	Spr.target(frame, 0.45, 5, { Position = frame:GetAttribute("OrigPosition") })
+	Spr.target(uiScale, 0.6, 3.5, { Scale = 1 })
+	Spr.target(frame, 0.55, 3.5, { Position = frame:GetAttribute("OrigPosition") })
 	frame.Visible = true
 
 	if not independent then
@@ -60,7 +62,10 @@ function UIController:OpenFrame(frame: Frame, independent: boolean?)
 			self:CloseFrame(self._currentOpenedFrame)
 		end
 
+		Spr.target(Camera, 0.7, 2.5, { FieldOfView = 75 })
 		self._currentOpenedFrame = frame
+	else
+		frame:AddTag("IndependentFrame")
 	end
 
 	self.OnFrameOpened:Fire(frame)
@@ -77,6 +82,12 @@ function UIController:CloseFrame(frame: Frame)
 	if self._currentOpenedFrame == frame then
 		self._currentOpenedFrame = nil
 	end
+
+	if not frame:HasTag("IndependentFrame") then
+		Spr.target(Camera, 0.7, 2.5, { FieldOfView = 70 })
+	end
+
+	frame:RemoveTag("IndependentFrame")
 
 	self.OnFrameClosed:Fire(frame)
 end
@@ -154,8 +165,8 @@ function UIController:BindButtonEffect(
 		uiScale.Parent = showFrame
 	end
 
-	local damping = 0.4
-	local frequency = 5.5
+	local damping = 0.5
+	local frequency = 6
 
 	local buttonSprings = {
 		Press = function()
@@ -217,19 +228,6 @@ function UIController:OnInit()
 	SoundController = require(script.Parent.SoundController)
 
 	--
-	for _, v in PlayerGui:GetDescendants() do
-		if not v:IsA("UIStroke") then
-			continue
-		end
-
-		v:AddTag("UIStroke")
-	end
-
-	PlayerGui.DescendantAdded:Connect(function(v)
-		if v:IsA("UIStroke") then
-			v:AddTag("UIStroke")
-		end
-	end)
 
 	-- Disable Reset Button
 	--[[task.spawn(function()

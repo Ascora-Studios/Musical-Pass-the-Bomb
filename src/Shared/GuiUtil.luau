@@ -19,6 +19,8 @@ local PULSE_CLEANUP_DELAY = 0.5
 
 local GuiUtil = {}
 
+local activeNumberAnimations = setmetatable({}, { __mode = "k" })
+
 --[[
 	Animates a number from 0 to a goal value, calling the callback with each updated value.
 	@param goal The target value to animate to
@@ -32,22 +34,52 @@ function GuiUtil.AnimateNumberTo(
 	detailed: boolean,
 	duration: number,
 	callback: (number) -> (),
+	startFrom: number?,
 	onFinished: (() -> ())?
 )
-	local valueObject = detailed and Instance.new("NumberValue") or Instance.new("IntValue")
-	valueObject.Value = 0
+	local previousAnimation = activeNumberAnimations[callback]
+	local startValue = startFrom or 0
 
-	valueObject:GetPropertyChangedSignal("Value"):Connect(function()
+	if previousAnimation then
+		startValue = previousAnimation.ValueObject.Value
+		previousAnimation.Cancelled = true
+		previousAnimation.Tween:Cancel()
+		previousAnimation.Connection:Disconnect()
+		previousAnimation.ValueObject:Destroy()
+	end
+
+	local valueObject = detailed and Instance.new("NumberValue") or Instance.new("IntValue")
+	valueObject.Value = startValue
+
+	local connection = valueObject:GetPropertyChangedSignal("Value"):Connect(function()
 		callback(valueObject.Value)
 	end)
 
 	local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear)
 	local tween = TweenService:Create(valueObject, tweenInfo, { Value = goal })
+	local animation = {
+		Cancelled = false,
+		Connection = connection,
+		Tween = tween,
+		ValueObject = valueObject,
+	}
 
-	tween.Completed:Once(function()
-		if onFinished then
-			onFinished()
+	activeNumberAnimations[callback] = animation
+
+	tween.Completed:Once(function(playbackState)
+		if animation.Cancelled or activeNumberAnimations[callback] ~= animation then
+			return
 		end
+
+		activeNumberAnimations[callback] = nil
+		connection:Disconnect()
+
+		if onFinished then
+			if playbackState == Enum.PlaybackState.Completed then
+				onFinished()
+			end
+		end
+
 		-- Clean up after a short delay to ensure callback is called
 		task.delay(CLEANUP_DELAY, function()
 			valueObject:Destroy()

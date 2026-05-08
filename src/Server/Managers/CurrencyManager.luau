@@ -12,7 +12,17 @@ function CurrencyManager:IncrementCurrency(player: Player, amount: number?, igno
 		return PlayerDataManager:IncrementDataKey(player, "Currency", amount)
 	end
 
-	-- TODO ADD THE BOOSTS HERE
+	--
+	local addition = 0
+	if player:HasTag("x2Coin") then
+		addition += amount
+	end
+
+	if player:HasTag("VIP") then
+		addition += math.round(amount * 0.25)
+	end
+
+	amount += addition
 	PlayerDataManager:IncrementDataKey(player, "Currency", amount)
 end
 

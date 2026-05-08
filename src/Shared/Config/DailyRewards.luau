@@ -26,7 +26,7 @@ local function logCurrencySource(player: Player, amount: number, day: string)
 				AnalyticsService:LogEconomyEvent(
 					player,
 					Enum.AnalyticsEconomyFlowType.Source,
-					"Bux",
+					"Coins",
 					amount,
 					currency,
 					Enum.AnalyticsEconomyTransactionType.TimedReward.Name,

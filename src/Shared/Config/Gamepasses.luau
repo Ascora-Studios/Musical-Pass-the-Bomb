@@ -9,7 +9,25 @@ export type Gamepass = {
 }
 
 local Gamepasses = {}
-Gamepasses.Data = {} :: { Gamepass }
+Gamepasses.Data = {
+	{
+		Id = "VIP",
+		Name = "VIP",
+		PassId = 1827629531,
+	},
+
+	{
+		Id = "x2Coin",
+		Name = "x2 Coins",
+		PassId = 1828135351,
+	},
+
+	{
+		Id = "x2Win",
+		Name = "x2 Wins",
+		PassId = 1826402596,
+	},
+} :: { Gamepass }
 
 table.freeze(Gamepasses.Data)
 
