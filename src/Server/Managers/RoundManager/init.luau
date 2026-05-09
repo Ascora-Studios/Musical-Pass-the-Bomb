@@ -1250,7 +1250,6 @@ function RoundManager:StartMatch(): boolean
 
 	-- Lock movement for all participants while the match is active
 	for _, player in self._alive do
-		PlayerDataManager:IncrementDataKey(player, "GamesPlayed")
 		setPlayerMovement(player, GameConfigs.MATCH_WALKSPEED, GameConfigs.MATCH_JUMPPOWER)
 	end
 
@@ -1422,6 +1421,13 @@ function RoundManager:FinalizeMatch()
 	end
 	self.OnMatchEnded:Fire(winner, placementsPayload)
 
+	for _, userId in self._placements do
+		local player = Players:GetPlayerByUserId(userId)
+		if player then
+			PlayerDataManager:IncrementDataKey(player, "GamesPlayed")
+		end
+	end
+
 	task.wait(GameConfigs.MATCH_END_CELEBRATION_DURATION)
 
 	-- Cleanup state for next match
@@ -1487,7 +1493,9 @@ function RoundManager:_onPlayerLeaving(player: Player)
 	end
 
 	if #self._alive <= 1 then
-		-- RunMatchLoop will detect this and exit naturally
+		-- RunMatchLoop will detect this and exit naturally. The final timer
+		-- clear should not play the music-stopped warning for the winner.
+		self._suppressNextMusicStop = true
 		return
 	end
 

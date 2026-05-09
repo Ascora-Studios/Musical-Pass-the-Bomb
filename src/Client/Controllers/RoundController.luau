@@ -760,6 +760,7 @@ function RoundController:OnMatchEnd(winner: { [string]: any }?, _placements: { [
 	workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
 	Spr.target(inGame, 0.7, 2.5, { Position = UDim2.fromScale(0.5, -0.5) })
 	inGame.Title.UIScale.Scale = 1
+	inGame.Middle.MusicStopped.UIScale.Scale = 0
 
 	self:ToggleGameControls(false)
 	HudController:HideHud()

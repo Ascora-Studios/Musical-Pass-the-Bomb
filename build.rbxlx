@@ -35251,6 +35251,7 @@ local AnalyticsService = game:GetService("AnalyticsService")
 -- Packages
 local Packages = ReplicatedStorage.Packages
 local BridgeNet2 = require(Packages.BridgeNet2)
+local Signal = require(Packages.Signal)
 
 -- Abilities
 local AbilitiesModules = ReplicatedStorage.Shared.Abilities
@@ -35274,6 +35275,8 @@ local AbilitiesManager = {
 	OnUseAbilityEvent = BridgeNet2.ReferenceBridge("OnUseAbility"),
 	RequestAbilityPurchaseEvent = BridgeNet2.ReferenceBridge("RequestAbilityPurchase"),
 	RequestPurchaseAbilityWithCurrencyEvent = BridgeNet2.ReferenceBridge("RequestPurchaseAbilityWithCurrency"),
+
+	OnAbilityUsed = Signal.new(),
 
 	_abilities = {},
 	_cooldowns = {},
@@ -35657,6 +35660,7 @@ function AbilitiesManager:_runAbility(player: Player, ability: string, abilityEn
 	self.UseAbilityEvent:Fire(BridgeNet2.Players(alivePlayers), { ability, "Victim" })
 	self.UseAbilityEvent:Fire(player, { ability, "Activator" })
 	self.OnUseAbilityEvent:Fire(player, { ability, cooldownEndsAt })
+	self.OnAbilityUsed:Fire(player, ability)
 
 	notify(
 		BridgeNet2.Players(alivePlayers),
@@ -35821,6 +35825,99 @@ return AbilitiesManager
           </Properties>
         </Item>
         <Item class="ModuleScript" referent="392">
+          <Properties>
+            <string name="Name">AnalyticsManager</string>
+            <string name="Source"><![CDATA[-- Services
+local AnalyticsService = game:GetService("AnalyticsService")
+local Players = game:GetService("Players")
+
+--
+local RoundManager
+local AbilitiesManager
+
+--
+local AnalyticsManager = {
+	_sessions = {},
+}
+
+local function logCustomEvent(player: Player, eventName: string, value: number, customFields: { [string]: any }?)
+	pcall(function()
+		if customFields then
+			AnalyticsService:LogCustomEvent(player, eventName, value, customFields)
+		else
+			AnalyticsService:LogCustomEvent(player, eventName, value)
+		end
+	end)
+end
+
+function AnalyticsManager:_trackPlayerJoined(player: Player)
+	self._sessions[player] = {
+		SessionRoundsPlayed = 0,
+		JoinedDuringRoundAt = RoundManager:IsMatchActive() and workspace:GetServerTimeNow() or nil,
+	}
+end
+
+function AnalyticsManager:_trackPlayerLeaving(player: Player)
+	local session = self._sessions[player]
+	if not session then
+		return
+	end
+
+	logCustomEvent(player, "Rounds Played Before Leave", session.SessionRoundsPlayed or 0)
+
+	if session.JoinedDuringRoundAt then
+		local stayDuration = math.max(0, workspace:GetServerTimeNow() - session.JoinedDuringRoundAt)
+		local playStatus = if (session.SessionRoundsPlayed or 0) > 0 then "Played Round" else "Left Before Playing"
+		logCustomEvent(player, "Mid Round Join Stay Time", math.floor(stayDuration + 0.5), {
+			[Enum.AnalyticsCustomFieldKeys.CustomField01.Name] = playStatus,
+		})
+	end
+
+	self._sessions[player] = nil
+end
+
+function AnalyticsManager:OnInit()
+	RoundManager = require(script.Parent.RoundManager)
+	AbilitiesManager = require(script.Parent.AbilitiesManager)
+end
+
+function AnalyticsManager:OnStart()
+	for _, player in Players:GetPlayers() do
+		self:_trackPlayerJoined(player)
+	end
+
+	Players.PlayerAdded:Connect(function(player: Player)
+		self:_trackPlayerJoined(player)
+	end)
+
+	Players.PlayerRemoving:Connect(function(player: Player)
+		self:_trackPlayerLeaving(player)
+	end)
+
+	RoundManager.OnMatchStarted:Connect(function(alivePlayers: { Player })
+		for _, player in alivePlayers do
+			local session = self._sessions[player]
+			if not session then
+				self:_trackPlayerJoined(player)
+				session = self._sessions[player]
+			end
+
+			session.SessionRoundsPlayed += 1
+		end
+	end)
+
+	AbilitiesManager.OnAbilityUsed:Connect(function(player: Player, ability: string)
+		logCustomEvent(player, "Ability Used", 1, {
+			[Enum.AnalyticsCustomFieldKeys.CustomField01.Name] = ability,
+		})
+	end)
+end
+
+return AnalyticsManager
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="393">
           <Properties>
             <string name="Name">BadgeManager</string>
             <string name="Source"><![CDATA[-- Services
@@ -36002,10 +36099,21 @@ function BadgeManager:OnStart() end
 return BadgeManager
 ]]></string>
           </Properties>
-          <Item class="ModuleScript" referent="393">
+          <Item class="ModuleScript" referent="394">
             <Properties>
               <string name="Name">Badges</string>
-              <string name="Source"><![CDATA[--[[ 
+              <string name="Source"><![CDATA[-- Services
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
+local Players = game:GetService("Players")
+
+-- Packages
+local Packages = ReplicatedStorage.Packages
+
+--
+local PlayerDataManager = require(ServerScriptService.Server.Managers.PlayerDataManager)
+
+--[[ 
 	OnInitCallback: This function runs when the BadgeService is initialized.
 	It is best to attach listeners in this function. (SHOULD ONLY BE CALLED ONCE!!!) 
 --]]
@@ -36024,7 +36132,61 @@ export type Badge = {
 
 local Badges = {}
 
-Badges.Data = {} :: { Badge }
+Badges.Data = {
+	{
+		Name = "Welcome!",
+		Key = "FirstJoin",
+		BadgeId = 931604781514469,
+		OnInitCallback = function(toAwardCallback: (player: Player, badgeKey: string) -> ())
+			Players.PlayerAdded:Connect(function(player: Player)
+				toAwardCallback(player, "FirstJoin")
+			end)
+
+			for _, player in Players:GetPlayers() do
+				toAwardCallback(player, "FirstJoin")
+			end
+		end,
+	},
+
+	{
+		Name = "1st Win",
+		Key = "FirstWin",
+		BadgeId = 3090271502708060,
+		OnInitCallback = function(toAwardCallback: (player: Player, badgeKey: string) -> ())
+			PlayerDataManager.OnDataChanged:Connect(function(player, key, newValue)
+				if key == "Wins" and newValue == 1 then
+					toAwardCallback(player, "FirstWin")
+				end
+			end)
+		end,
+	},
+
+	{
+		Name = "5th Win",
+		Key = "FiveWins",
+		BadgeId = 3260823466998087,
+		OnInitCallback = function(toAwardCallback: (player: Player, badgeKey: string) -> ())
+			PlayerDataManager.OnDataChanged:Connect(function(player, key, newValue)
+				if key == "Wins" and newValue == 5 then
+					toAwardCallback(player, "FiveWins")
+				end
+			end)
+		end,
+	},
+
+	{
+		Name = "Get 10 Wins",
+		Key = "TenWins",
+		BadgeId = 2390890035926874,
+		OnInitCallback = function(toAwardCallback: (player: Player, badgeKey: string) -> ())
+			PlayerDataManager.OnDataChanged:Connect(function(player, key, newValue)
+				if key == "Wins" and newValue == 10 then
+					toAwardCallback(player, "TenWins")
+				end
+			end)
+		end,
+	},
+} :: { Badge }
 
 function Badges.GetBadgeFromKey(key: string): Badge
 	for _, v in Badges.Data do
@@ -36045,7 +36207,7 @@ return Badges
             </Properties>
           </Item>
         </Item>
-        <Item class="ModuleScript" referent="394">
+        <Item class="ModuleScript" referent="395">
           <Properties>
             <string name="Name">BombManager</string>
             <string name="Source"><![CDATA[--[[
@@ -36153,7 +36315,7 @@ return BombManager
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="395">
+        <Item class="ModuleScript" referent="396">
           <Properties>
             <string name="Name">CodeManager</string>
             <string name="Source"><![CDATA[-- Services
@@ -36252,7 +36414,7 @@ end
 return CodeManager
 ]]></string>
           </Properties>
-          <Item class="ModuleScript" referent="396">
+          <Item class="ModuleScript" referent="397">
             <Properties>
               <string name="Name">Codes</string>
               <string name="Source"><![CDATA[export type Code = {
@@ -36280,7 +36442,7 @@ return Codes
             </Properties>
           </Item>
         </Item>
-        <Item class="ModuleScript" referent="397">
+        <Item class="ModuleScript" referent="398">
           <Properties>
             <string name="Name">CurrencyManager</string>
             <string name="Source"><![CDATA[--
@@ -36334,7 +36496,7 @@ return CurrencyManager
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="398">
+        <Item class="ModuleScript" referent="399">
           <Properties>
             <string name="Name">DailyRewardManager</string>
             <string name="Source"><![CDATA[-- Services
@@ -36490,7 +36652,7 @@ return DailyRewardManager
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="399">
+        <Item class="ModuleScript" referent="400">
           <Properties>
             <string name="Name">EffectManager</string>
             <string name="Source"><![CDATA[-- Services
@@ -36509,7 +36671,7 @@ return EffectManager
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="400">
+        <Item class="ModuleScript" referent="401">
           <Properties>
             <string name="Name">FriendManager</string>
             <string name="Source"><![CDATA[-- Services
@@ -36557,7 +36719,7 @@ return FriendManager
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="401">
+        <Item class="ModuleScript" referent="402">
           <Properties>
             <string name="Name">GroupRewardManager</string>
             <string name="Source"><![CDATA[-- Services
@@ -36673,7 +36835,7 @@ return GroupRewardManager
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="402">
+        <Item class="ModuleScript" referent="403">
           <Properties>
             <string name="Name">LeaderboardManager</string>
             <string name="Source"><![CDATA[-- Services
@@ -36790,7 +36952,7 @@ return LeaderboardManager
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="403">
+        <Item class="ModuleScript" referent="404">
           <Properties>
             <string name="Name">NotificationManager</string>
             <string name="Source"><![CDATA[-- Services
@@ -36810,7 +36972,7 @@ return NotificationManager
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="404">
+        <Item class="ModuleScript" referent="405">
           <Properties>
             <string name="Name">OverheadUIManager</string>
             <string name="Source"><![CDATA[-- Services
@@ -36895,7 +37057,7 @@ return OverheadUIManager
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="405">
+        <Item class="ModuleScript" referent="406">
           <Properties>
             <string name="Name">PlayerDataManager</string>
             <string name="Source"><![CDATA[-- Services
@@ -37318,7 +37480,7 @@ end
 return PlayerDataManager
 ]]></string>
           </Properties>
-          <Item class="ModuleScript" referent="406">
+          <Item class="ModuleScript" referent="407">
             <Properties>
               <string name="Name">DataSettings</string>
               <string name="Source"><![CDATA[return {
@@ -37352,7 +37514,7 @@ return PlayerDataManager
             </Properties>
           </Item>
         </Item>
-        <Item class="ModuleScript" referent="407">
+        <Item class="ModuleScript" referent="408">
           <Properties>
             <string name="Name">RagdollManager</string>
             <string name="Source"><![CDATA[-- Services
@@ -37442,7 +37604,7 @@ return RagdollManager
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="408">
+        <Item class="ModuleScript" referent="409">
           <Properties>
             <string name="Name">RoundManager</string>
             <string name="Source"><![CDATA[--[[
@@ -37586,6 +37748,7 @@ RoundManager._matchActive = false
 RoundManager._explosionTimestamp = 0
 RoundManager._musicDuration = 0
 RoundManager._passesLocked = false
+RoundManager._lastPassAt = 0
 RoundManager._activeShields = {} :: { [Player]: boolean }
 RoundManager._activeReflects = {} :: { [Player]: boolean }
 RoundManager._lockTarget = nil :: Player?
@@ -38414,6 +38577,12 @@ function RoundManager:_handleBombPassRequest(player: Player, payload: any)
 		return -- target is not in the alive list
 	end
 
+	local now = workspace:GetServerTimeNow()
+	if now - self._lastPassAt < GameConfigs.PASS_COOLDOWN then
+		return
+	end
+	self._lastPassAt = now
+
 	local from = player
 	if self:_consumeShield(target, from) then
 		return
@@ -38663,6 +38832,7 @@ function RoundManager:StartMatch(): boolean
 	self._placements = {}
 	self._matchActive = false
 	self._passesLocked = false
+	self._lastPassAt = 0
 	self._activeShields = {}
 	self._activeReflects = {}
 	self._nukeActive = false
@@ -38689,7 +38859,6 @@ function RoundManager:StartMatch(): boolean
 
 	-- Lock movement for all participants while the match is active
 	for _, player in self._alive do
-		PlayerDataManager:IncrementDataKey(player, "GamesPlayed")
 		setPlayerMovement(player, GameConfigs.MATCH_WALKSPEED, GameConfigs.MATCH_JUMPPOWER)
 	end
 
@@ -38860,6 +39029,13 @@ function RoundManager:FinalizeMatch()
 		self:_onMatchEnded(winner, placementsPayload)
 	end
 	self.OnMatchEnded:Fire(winner, placementsPayload)
+
+	for _, userId in self._placements do
+		local player = Players:GetPlayerByUserId(userId)
+		if player then
+			PlayerDataManager:IncrementDataKey(player, "GamesPlayed")
+		end
+	end
 
 	task.wait(GameConfigs.MATCH_END_CELEBRATION_DURATION)
 
@@ -39127,7 +39303,7 @@ end
 return RoundManager
 ]]></string>
           </Properties>
-          <Item class="ModuleScript" referent="409">
+          <Item class="ModuleScript" referent="410">
             <Properties>
               <string name="Name">GameConfigs</string>
               <string name="Source"><![CDATA[--[[
@@ -39177,6 +39353,7 @@ local GameConfigs = {
 	MATCH_JUMPPOWER = 0,
 
 	-- Bomb passing
+	PASS_COOLDOWN = 0.1, -- seconds between accepted pass attempts
 	VALID_PASS_DIRECTIONS = {
 		Left = true,
 		Right = true,
@@ -39188,11 +39365,11 @@ return GameConfigs
 ]]></string>
             </Properties>
           </Item>
-          <Item class="Folder" referent="410">
+          <Item class="Folder" referent="411">
             <Properties>
               <string name="Name">Stages</string>
             </Properties>
-            <Item class="ModuleScript" referent="411">
+            <Item class="ModuleScript" referent="412">
               <Properties>
                 <string name="Name">InitMatch</string>
                 <string name="Source"><![CDATA[local GameConfigs = require(script.Parent.Parent.GameConfigs)
@@ -39231,7 +39408,7 @@ return Stage
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="412">
+            <Item class="ModuleScript" referent="413">
               <Properties>
                 <string name="Name">Intermission</string>
                 <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -39323,7 +39500,7 @@ return Stage
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="413">
+            <Item class="ModuleScript" referent="414">
               <Properties>
                 <string name="Name">Match</string>
                 <string name="Source"><![CDATA[local Stage = {}
@@ -39365,7 +39542,7 @@ return Stage
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="414">
+            <Item class="ModuleScript" referent="415">
               <Properties>
                 <string name="Name">MatchEnd</string>
                 <string name="Source"><![CDATA[local Stage = {}
@@ -39406,7 +39583,7 @@ return Stage
             </Item>
           </Item>
         </Item>
-        <Item class="ModuleScript" referent="415">
+        <Item class="ModuleScript" referent="416">
           <Properties>
             <string name="Name">SelectPlayerManager</string>
             <string name="Source"><![CDATA[-- Services
@@ -39617,7 +39794,7 @@ return SelectPlayerManager
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="416">
+        <Item class="ModuleScript" referent="417">
           <Properties>
             <string name="Name">ShopManager</string>
             <string name="Source"><![CDATA[-- Services
@@ -40038,7 +40215,7 @@ return ShopManager
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="417">
+        <Item class="ModuleScript" referent="418">
           <Properties>
             <string name="Name">SoundManager</string>
             <string name="Source"><![CDATA[-- Services
@@ -40097,7 +40274,7 @@ return SoundManager
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="418">
+        <Item class="ModuleScript" referent="419">
           <Properties>
             <string name="Name">TimeRewardManager</string>
             <string name="Source"><![CDATA[-- Services
@@ -40238,11 +40415,11 @@ return TimeRewardManager
           </Properties>
         </Item>
       </Item>
-      <Item class="Folder" referent="419">
+      <Item class="Folder" referent="420">
         <Properties>
           <string name="Name">Modules</string>
         </Properties>
-        <Item class="ModuleScript" referent="420">
+        <Item class="ModuleScript" referent="421">
           <Properties>
             <string name="Name">BuildRagdoll</string>
             <string name="Source"><![CDATA[--[[
@@ -40322,7 +40499,7 @@ return function(humanoid)
 end
 ]]></string>
           </Properties>
-          <Item class="ModuleScript" referent="421">
+          <Item class="ModuleScript" referent="422">
             <Properties>
               <string name="Name">BuildCollisionFilters</string>
               <string name="Source"><![CDATA[--[[
@@ -40485,7 +40662,7 @@ end
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="422">
+          <Item class="ModuleScript" referent="423">
             <Properties>
               <string name="Name">BuildConstraints</string>
               <string name="Source"><![CDATA[--[[
@@ -40579,7 +40756,7 @@ end
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="423">
+          <Item class="ModuleScript" referent="424">
             <Properties>
               <string name="Name">GetLastWordFromPascalCase</string>
               <string name="Source"><![CDATA[--[[
@@ -40605,7 +40782,7 @@ end
             </Properties>
           </Item>
         </Item>
-        <Item class="ModuleScript" referent="424">
+        <Item class="ModuleScript" referent="425">
           <Properties>
             <string name="Name">LoadedComponents</string>
             <string name="Source"><![CDATA[return {}
@@ -40613,7 +40790,7 @@ end
           </Properties>
         </Item>
       </Item>
-      <Item class="Script" referent="425">
+      <Item class="Script" referent="426">
         <Properties>
           <string name="Name">Runtime</string>
           <token name="RunContext">0</token>
@@ -40740,32 +40917,32 @@ print(string.format("Server Fully Loaded: %.2f ms", totalLoadTime))
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Folder" referent="426">
+      <Item class="Folder" referent="427">
         <Properties>
           <string name="Name">Components</string>
         </Properties>
       </Item>
     </Item>
-    <Item class="Folder" referent="427">
+    <Item class="Folder" referent="428">
       <Properties>
         <string name="Name">ServerPackages</string>
       </Properties>
-      <Item class="ModuleScript" referent="428">
+      <Item class="ModuleScript" referent="429">
         <Properties>
           <string name="Name">ProfileStore</string>
           <string name="Source"><![CDATA[return require(script.Parent._Index["lm-loleris_profilestore@1.0.3"]["profilestore"])
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Folder" referent="429">
+      <Item class="Folder" referent="430">
         <Properties>
           <string name="Name">_Index</string>
         </Properties>
-        <Item class="Folder" referent="430">
+        <Item class="Folder" referent="431">
           <Properties>
             <string name="Name">lm-loleris_profilestore@1.0.3</string>
           </Properties>
-          <Item class="ModuleScript" referent="431">
+          <Item class="ModuleScript" referent="432">
             <Properties>
               <string name="Name">profilestore</string>
               <string name="Source">--[[
@@ -43017,23 +43194,23 @@ return ProfileStore</string>
       </Item>
     </Item>
   </Item>
-  <Item class="StarterPlayer" referent="432">
+  <Item class="StarterPlayer" referent="433">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="433">
+    <Item class="StarterPlayerScripts" referent="434">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="Folder" referent="434">
+      <Item class="Folder" referent="435">
         <Properties>
           <string name="Name">Client</string>
         </Properties>
-        <Item class="Folder" referent="435">
+        <Item class="Folder" referent="436">
           <Properties>
             <string name="Name">Components</string>
           </Properties>
-          <Item class="ModuleScript" referent="436">
+          <Item class="ModuleScript" referent="437">
             <Properties>
               <string name="Name">EventInviter</string>
               <string name="Source"><![CDATA[-- Services
@@ -43078,7 +43255,7 @@ return EventInviter
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="437">
+          <Item class="ModuleScript" referent="438">
             <Properties>
               <string name="Name">GradientPart</string>
               <string name="Source"><![CDATA[-- Services
@@ -43130,7 +43307,7 @@ return GradientPart
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="438">
+          <Item class="ModuleScript" referent="439">
             <Properties>
               <string name="Name">ImagePan</string>
               <string name="Source"><![CDATA[-- Services
@@ -43164,7 +43341,7 @@ return ImagePan
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="439">
+          <Item class="ModuleScript" referent="440">
             <Properties>
               <string name="Name">PartHover</string>
               <string name="Source"><![CDATA[-- Services
@@ -43214,7 +43391,7 @@ return PartHover
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="440">
+          <Item class="ModuleScript" referent="441">
             <Properties>
               <string name="Name">PartSpin</string>
               <string name="Source"><![CDATA[-- Services
@@ -43252,7 +43429,7 @@ return PartSpin
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="441">
+          <Item class="ModuleScript" referent="442">
             <Properties>
               <string name="Name">PromptSubjectHighlight</string>
               <string name="Source"><![CDATA[-- Services
@@ -43305,7 +43482,7 @@ return PromptSubjectHighlight
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="442">
+          <Item class="ModuleScript" referent="443">
             <Properties>
               <string name="Name">RainbowColor</string>
               <string name="Source"><![CDATA[-- Services
@@ -43365,7 +43542,7 @@ return RainbowColor
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="443">
+          <Item class="ModuleScript" referent="444">
             <Properties>
               <string name="Name">RainbowStroke</string>
               <string name="Source"><![CDATA[-- Services
@@ -43413,7 +43590,7 @@ return RainbowStroke
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="444">
+          <Item class="ModuleScript" referent="445">
             <Properties>
               <string name="Name">UIHover</string>
               <string name="Source"><![CDATA[-- Services
@@ -43449,7 +43626,7 @@ return UIHover
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="445">
+          <Item class="ModuleScript" referent="446">
             <Properties>
               <string name="Name">UIPop</string>
               <string name="Source"><![CDATA[-- Services
@@ -43493,7 +43670,7 @@ return UIPop
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="446">
+          <Item class="ModuleScript" referent="447">
             <Properties>
               <string name="Name">UIPulse</string>
               <string name="Source"><![CDATA[-- Services
@@ -43537,7 +43714,7 @@ return UIPulse
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="447">
+          <Item class="ModuleScript" referent="448">
             <Properties>
               <string name="Name">UIRainbow</string>
               <string name="Source"><![CDATA[-- Services
@@ -43589,7 +43766,7 @@ return RainbowUI
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="448">
+          <Item class="ModuleScript" referent="449">
             <Properties>
               <string name="Name">UIRotate</string>
               <string name="Source"><![CDATA[-- Services
@@ -43618,7 +43795,7 @@ return UIRotate
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="449">
+          <Item class="ModuleScript" referent="450">
             <Properties>
               <string name="Name">UISway</string>
               <string name="Source"><![CDATA[-- Services
@@ -43663,7 +43840,7 @@ return UISway
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="450">
+          <Item class="ModuleScript" referent="451">
             <Properties>
               <string name="Name">VIP</string>
               <string name="Source"><![CDATA[-- Services
@@ -43801,11 +43978,11 @@ return VIPCrown
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="451">
+        <Item class="Folder" referent="452">
           <Properties>
             <string name="Name">Controllers</string>
           </Properties>
-          <Item class="ModuleScript" referent="452">
+          <Item class="ModuleScript" referent="453">
             <Properties>
               <string name="Name">AbilitiesController</string>
               <string name="Source"><![CDATA[-- Services
@@ -44000,7 +44177,7 @@ return AbilitiesController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="453">
+          <Item class="ModuleScript" referent="454">
             <Properties>
               <string name="Name">AnimationController</string>
               <string name="Source"><![CDATA[-- Services
@@ -44069,7 +44246,7 @@ return AnimationController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="454">
+          <Item class="ModuleScript" referent="455">
             <Properties>
               <string name="Name">CameraController</string>
               <string name="Source"><![CDATA[-- Services
@@ -44239,7 +44416,7 @@ return CameraController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="455">
+          <Item class="ModuleScript" referent="456">
             <Properties>
               <string name="Name">CurrencyController</string>
               <string name="Source"><![CDATA[-- Services
@@ -44320,7 +44497,7 @@ return CurrencyController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="456">
+          <Item class="ModuleScript" referent="457">
             <Properties>
               <string name="Name">CustomizedChatController</string>
               <string name="Source"><![CDATA[-- Services
@@ -44403,7 +44580,7 @@ return ChatTagController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="457">
+          <Item class="ModuleScript" referent="458">
             <Properties>
               <string name="Name">EffectController</string>
               <string name="Source"><![CDATA[-- Services
@@ -44455,7 +44632,162 @@ return EffectController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="458">
+          <Item class="ModuleScript" referent="459">
+            <Properties>
+              <string name="Name">FriendController</string>
+              <string name="Source"><![CDATA[-- Services
+local AvatarEditorService = game:GetService("AvatarEditorService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local SocialService = game:GetService("SocialService")
+local StarterGui = game:GetService("StarterGui")
+local Players = game:GetService("Players")
+
+-- Packages
+local Packages = ReplicatedStorage.Packages
+local TopbarPlus = require(Packages.TopbarPlus)
+
+-- Local Player
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer.PlayerGui
+
+--
+local PlayerDataController
+
+--
+local SHOW_RANDOM_FRIEND_INVITE_FREQUENCE = 5 * 60 -- every 5 minutes
+
+--
+local FriendController = {}
+
+-- Prompts the friend invite UI
+function FriendController:OpenFriendInvitePrompt()
+	local success, canInvite = pcall(function()
+		return SocialService:CanSendGameInviteAsync(LocalPlayer)
+	end)
+
+	if not success or not canInvite then
+		return
+	end
+
+	SocialService:PromptGameInvite(LocalPlayer)
+end
+
+-- Invites a specific friend
+function FriendController:InviteFriend(friendUserId: number)
+	local experienceInviteOption = Instance.new("ExperienceInviteOptions")
+	experienceInviteOption.InviteUser = friendUserId
+
+	SocialService:PromptGameInvite(LocalPlayer, experienceInviteOption)
+end
+
+-- Sends a random friend request
+function FriendController:SendRandomFriendRequest()
+	local attempt = 0
+	local function getPlayer(): Player
+		local players = Players:GetPlayers()
+		local randomIndex = math.random(1, #players)
+
+		attempt = attempt + 1
+		if attempt > 5 then
+			return nil
+		end
+
+		if players[randomIndex] == LocalPlayer then
+			return getPlayer()
+		end
+
+		return players[randomIndex]
+	end
+
+	local randomPlayer = getPlayer()
+	if not randomPlayer then
+		return
+	end
+
+	StarterGui:SetCore("PromptSendFriendRequest", randomPlayer)
+end
+
+-- Starts the random friend invite, the thing on the bottom left
+function FriendController:_runRandomInviteFriend()
+	local currentRandomFriendId
+	local clickBindable = Instance.new("BindableFunction")
+	clickBindable.OnInvoke = function(response)
+		if response == "Yes!" then
+			self:InviteFriend(currentRandomFriendId)
+		end
+	end
+
+	while true do
+		task.wait(SHOW_RANDOM_FRIEND_INVITE_FREQUENCE)
+
+		local success, onlineFriends = pcall(function()
+			return LocalPlayer:GetFriendsOnline()
+		end)
+
+		if not success or not onlineFriends or #onlineFriends == 0 then
+			continue
+		end
+
+		local randomFriend = onlineFriends[math.random(1, #onlineFriends)]
+
+		local success, friendIcon = pcall(function()
+			return Players:GetUserThumbnailAsync(
+				randomFriend.VisitorId,
+				Enum.ThumbnailType.HeadShot,
+				Enum.ThumbnailSize.Size420x420
+			)
+		end)
+
+		if not success then
+			continue
+		end
+
+		currentRandomFriendId = randomFriend.VisitorId
+		StarterGui:SetCore("SendNotification", {
+			Title = randomFriend.DisplayName,
+			Icon = friendIcon,
+			Text = "Your friend wants to play with you! Want to invite them?",
+			Duration = 10,
+			Button1 = "Yes!",
+			Button2 = "No",
+			Callback = clickBindable,
+		})
+	end
+end
+
+--
+function FriendController:OnInit()
+	PlayerDataController = require(script.Parent.PlayerDataController)
+end
+
+function FriendController:OnStart()
+	task.spawn(FriendController._runRandomInviteFriend, self)
+
+	--
+	PlayerDataController:GetReplica():andThen(function(replica)
+		replica:OnSet({ "GamesPlayed" }, function(newGamesPlayed, oldGamesPlayed)
+			if oldGamesPlayed == 0 and newGamesPlayed == 1 then
+				AvatarEditorService:PromptSetFavorite(112106880997084, Enum.AvatarItemType.Asset, true)
+			end
+		end)
+	end)
+
+	local friendIcon = TopbarPlus.new()
+	friendIcon:setImage("rbxassetid://78605640824200")
+	friendIcon:setLabel("Invite Friends")
+	friendIcon:setOrder(2)
+	friendIcon:oneClick(true)
+
+	friendIcon.selected:Connect(function()
+		self:OpenFriendInvitePrompt()
+	end)
+end
+
+return FriendController
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="460">
             <Properties>
               <string name="Name">GroupRewardController</string>
               <string name="Source"><![CDATA[-- Services
@@ -44514,7 +44846,7 @@ return GroupRewardController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="459">
+          <Item class="ModuleScript" referent="461">
             <Properties>
               <string name="Name">HudController</string>
               <string name="Source"><![CDATA[-- Services
@@ -44582,7 +44914,7 @@ return HudController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="460">
+          <Item class="ModuleScript" referent="462">
             <Properties>
               <string name="Name">IntroController</string>
               <string name="Source"><![CDATA[-- Services
@@ -44638,7 +44970,7 @@ return IntroController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="461">
+          <Item class="ModuleScript" referent="463">
             <Properties>
               <string name="Name">LeaderboardController</string>
               <string name="Source"><![CDATA[-- Services
@@ -44822,7 +45154,7 @@ return LeaderboardController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="462">
+          <Item class="ModuleScript" referent="464">
             <Properties>
               <string name="Name">NotificationController</string>
               <string name="Source"><![CDATA[-- Services
@@ -44950,7 +45282,7 @@ return NotificationController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="463">
+          <Item class="ModuleScript" referent="465">
             <Properties>
               <string name="Name">PlayerDataController</string>
               <string name="Source"><![CDATA[-- Services
@@ -45024,7 +45356,7 @@ return PlayerDataController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="464">
+          <Item class="ModuleScript" referent="466">
             <Properties>
               <string name="Name">RagdollController</string>
               <string name="Source"><![CDATA[-- Services
@@ -45128,7 +45460,7 @@ return RagdollController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="465">
+          <Item class="ModuleScript" referent="467">
             <Properties>
               <string name="Name">RoundController</string>
               <string name="Source"><![CDATA[--[[
@@ -46211,7 +46543,7 @@ return RoundController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="466">
+          <Item class="ModuleScript" referent="468">
             <Properties>
               <string name="Name">SelectPlayerController</string>
               <string name="Source"><![CDATA[-- Services
@@ -46488,7 +46820,7 @@ return SelectPlayerController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="467">
+          <Item class="ModuleScript" referent="469">
             <Properties>
               <string name="Name">ShopController</string>
               <string name="Source"><![CDATA[-- Services
@@ -46778,7 +47110,7 @@ return ShopController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="468">
+          <Item class="ModuleScript" referent="470">
             <Properties>
               <string name="Name">SoundController</string>
               <string name="Source"><![CDATA[-- Services
@@ -47065,7 +47397,7 @@ return SoundController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="469">
+          <Item class="ModuleScript" referent="471">
             <Properties>
               <string name="Name">TimeRewardController</string>
               <string name="Source"><![CDATA[-- Services
@@ -47206,7 +47538,7 @@ return TimeRewardController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="470">
+          <Item class="ModuleScript" referent="472">
             <Properties>
               <string name="Name">UIController</string>
               <string name="Source"><![CDATA[-- Services
@@ -47458,11 +47790,11 @@ return UIController
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="471">
+        <Item class="Folder" referent="473">
           <Properties>
             <string name="Name">Effects</string>
           </Properties>
-          <Item class="ModuleScript" referent="472">
+          <Item class="ModuleScript" referent="474">
             <Properties>
               <string name="Name">CoinReceived</string>
               <string name="Source"><![CDATA[-- Services
@@ -47503,7 +47835,7 @@ end
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="473">
+          <Item class="ModuleScript" referent="475">
             <Properties>
               <string name="Name">Confetti</string>
               <string name="Source"><![CDATA[-- Services
@@ -47668,7 +48000,7 @@ end
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="474">
+          <Item class="ModuleScript" referent="476">
             <Properties>
               <string name="Name">Nuke</string>
               <string name="Source"><![CDATA[-- Services
@@ -47736,11 +48068,11 @@ end
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="475">
+        <Item class="Folder" referent="477">
           <Properties>
             <string name="Name">Modules</string>
           </Properties>
-          <Item class="ModuleScript" referent="476">
+          <Item class="ModuleScript" referent="478">
             <Properties>
               <string name="Name">AnimatedNumber</string>
               <string name="Source"><![CDATA[-- Services
@@ -47818,7 +48150,7 @@ return AnimatedNumber
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="477">
+          <Item class="ModuleScript" referent="479">
             <Properties>
               <string name="Name">LoadedComponents</string>
               <string name="Source"><![CDATA[return {}
@@ -47826,7 +48158,7 @@ return AnimatedNumber
             </Properties>
           </Item>
         </Item>
-        <Item class="LocalScript" referent="478">
+        <Item class="LocalScript" referent="480">
           <Properties>
             <string name="Name">Runtime</string>
             <string name="Source"><![CDATA[-- Services
@@ -47968,11 +48300,11 @@ print(string.format("Client Fully Loaded: %.2f ms", totalLoadTime))
           </Properties>
         </Item>
       </Item>
-      <Item class="Folder" referent="479">
+      <Item class="Folder" referent="481">
         <Properties>
           <string name="Name">Components</string>
         </Properties>
-        <Item class="ModuleScript" referent="480">
+        <Item class="ModuleScript" referent="482">
           <Properties>
             <string name="Name">EventInviter</string>
             <string name="Source"><![CDATA[-- Services
@@ -48017,7 +48349,7 @@ return EventInviter
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="481">
+        <Item class="ModuleScript" referent="483">
           <Properties>
             <string name="Name">GradientPart</string>
             <string name="Source"><![CDATA[-- Services
@@ -48069,7 +48401,7 @@ return GradientPart
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="482">
+        <Item class="ModuleScript" referent="484">
           <Properties>
             <string name="Name">ImagePan</string>
             <string name="Source"><![CDATA[-- Services
@@ -48103,7 +48435,7 @@ return ImagePan
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="483">
+        <Item class="ModuleScript" referent="485">
           <Properties>
             <string name="Name">PartHover</string>
             <string name="Source"><![CDATA[-- Services
@@ -48153,7 +48485,7 @@ return PartHover
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="484">
+        <Item class="ModuleScript" referent="486">
           <Properties>
             <string name="Name">PartSpin</string>
             <string name="Source"><![CDATA[-- Services
@@ -48191,7 +48523,7 @@ return PartSpin
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="485">
+        <Item class="ModuleScript" referent="487">
           <Properties>
             <string name="Name">PromptSubjectHighlight</string>
             <string name="Source"><![CDATA[-- Services
@@ -48244,7 +48576,7 @@ return PromptSubjectHighlight
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="486">
+        <Item class="ModuleScript" referent="488">
           <Properties>
             <string name="Name">RainbowColor</string>
             <string name="Source"><![CDATA[-- Services
@@ -48304,7 +48636,7 @@ return RainbowColor
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="487">
+        <Item class="ModuleScript" referent="489">
           <Properties>
             <string name="Name">RainbowStroke</string>
             <string name="Source"><![CDATA[-- Services
@@ -48352,7 +48684,7 @@ return RainbowStroke
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="488">
+        <Item class="ModuleScript" referent="490">
           <Properties>
             <string name="Name">UIHover</string>
             <string name="Source"><![CDATA[-- Services
@@ -48388,7 +48720,7 @@ return UIHover
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="489">
+        <Item class="ModuleScript" referent="491">
           <Properties>
             <string name="Name">UIPop</string>
             <string name="Source"><![CDATA[-- Services
@@ -48432,7 +48764,7 @@ return UIPop
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="490">
+        <Item class="ModuleScript" referent="492">
           <Properties>
             <string name="Name">UIPulse</string>
             <string name="Source"><![CDATA[-- Services
@@ -48476,7 +48808,7 @@ return UIPulse
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="491">
+        <Item class="ModuleScript" referent="493">
           <Properties>
             <string name="Name">UIRainbow</string>
             <string name="Source"><![CDATA[-- Services
@@ -48528,7 +48860,7 @@ return RainbowUI
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="492">
+        <Item class="ModuleScript" referent="494">
           <Properties>
             <string name="Name">UIRotate</string>
             <string name="Source"><![CDATA[-- Services
@@ -48557,7 +48889,7 @@ return UIRotate
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="493">
+        <Item class="ModuleScript" referent="495">
           <Properties>
             <string name="Name">UISway</string>
             <string name="Source"><![CDATA[-- Services
@@ -48602,7 +48934,7 @@ return UISway
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="494">
+        <Item class="ModuleScript" referent="496">
           <Properties>
             <string name="Name">VIP</string>
             <string name="Source"><![CDATA[-- Services
