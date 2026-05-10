@@ -28,7 +28,7 @@ local GameConfigs = {
 	RESPAWN_PRODUCT_ID = "Respawn", -- Products.Data id for the paid respawn developer product
 
 	-- Music / explosion timer
-	MUSIC_DURATION_RANGE = NumberRange.new(5, 15), -- min/max song length (seconds)
+	MUSIC_DURATION_RANGE = NumberRange.new(10, 18), -- min/max song length (seconds)
 	NUKE_TIMER_LOCK_DURATION = 600, -- keeps the normal bomb timer from expiring while the nuke effect plays
 	NUKE_EFFECT_DELAY = 2, -- seconds between the nuke effect firing and the mass elimination
 

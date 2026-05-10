@@ -30,7 +30,7 @@ local Badges = {}
 
 Badges.Data = {
 	{
-		Name = "Welcome!",
+		Name = "Welcome",
 		Key = "FirstJoin",
 		BadgeId = 931604781514469,
 		OnInitCallback = function(toAwardCallback: (player: Player, badgeKey: string) -> ())

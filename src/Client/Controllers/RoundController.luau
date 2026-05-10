@@ -281,6 +281,7 @@ function RoundController:OnIntermissionWaiting()
 	local winnerFrame = ui.Winner
 
 	--
+	self._countdownEndsAt = 0
 	Spr.target(intermission, 0.7, 2.5, { Position = UDim2.fromScale(0.5, 0.325) })
 	Spr.target(winnerFrame, 0.7, 2.5, { Position = UDim2.fromScale(0.5, -0.5) })
 	intermission.Countdown.Visible = false
@@ -752,6 +753,7 @@ function RoundController:OnMatchEnd(winner: { [string]: any }?, _placements: { [
 	local ui = self.GameUI
 	local top = ui.Top
 	local inGame = top.InGame
+	local middle = ui.Middle
 	local winnerFrame = top.Winner
 
 	local winnerName = winner and winner.Name or "none"
@@ -760,7 +762,7 @@ function RoundController:OnMatchEnd(winner: { [string]: any }?, _placements: { [
 	workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
 	Spr.target(inGame, 0.7, 2.5, { Position = UDim2.fromScale(0.5, -0.5) })
 	inGame.Title.UIScale.Scale = 1
-	inGame.Middle.MusicStopped.UIScale.Scale = 0
+	middle.MusicStopped.UIScale.Scale = 0
 
 	self:ToggleGameControls(false)
 	HudController:HideHud()
@@ -774,6 +776,7 @@ function RoundController:OnMatchEnd(winner: { [string]: any }?, _placements: { [
 	Spr.target(winnerFrame, 0.7, 2.5, { Position = UDim2.fromScale(0.5, 0.1) })
 
 	SoundController:SwitchBGM("Background", 1.5)
+	AnimationController:StopAnimation("HoldBomb")
 
 	-- Reset per-match state so it doesn't bleed into the next match.
 	-- _lastStage is intentionally left alone — it drives stage-change detection

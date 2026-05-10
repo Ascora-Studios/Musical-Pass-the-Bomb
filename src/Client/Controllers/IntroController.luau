@@ -22,7 +22,7 @@ function IntroController:RunIntro()
 
 	--
 	humanoid.CameraOffset = Vector3.new(0, 5, 0)
-	task.wait(5.5)
+	task.wait(5)
 
 	--
 	TweenService:Create(dim, TweenInfo.new(2.5, Enum.EasingStyle.Quad), {
@@ -33,7 +33,7 @@ function IntroController:RunIntro()
 		GroupTransparency = 1,
 	}):Play()
 
-	TweenService:Create(humanoid, TweenInfo.new(3, Enum.EasingStyle.Sine), {
+	TweenService:Create(humanoid, TweenInfo.new(2, Enum.EasingStyle.Sine), {
 		CameraOffset = Vector3.new(0, 0, 0),
 	}):Play()
 

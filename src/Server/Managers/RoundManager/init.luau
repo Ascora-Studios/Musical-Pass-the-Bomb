@@ -96,6 +96,7 @@ local ShopManager
 local PlayerDataManager
 local NotificationManager
 local SoundManager
+local AFKManager
 
 --
 local FIRST_STAGE = "Intermission"
@@ -992,13 +993,15 @@ end
 ----------------------------------------------------------------
 
 function RoundManager:HasEnoughPlayers(): boolean
-	return #Players:GetPlayers() >= GameConfigs.MIN_PLAYERS_TO_START
+	return #self:GetEligiblePlayers() >= GameConfigs.MIN_PLAYERS_TO_START
 end
 
 function RoundManager:GetEligiblePlayers(): { Player }
 	local eligible = {}
 	for _, player in Players:GetPlayers() do
-		table.insert(eligible, player)
+		if not AFKManager:IsAFK(player) then
+			table.insert(eligible, player)
+		end
 	end
 	return eligible
 end
@@ -1641,6 +1644,7 @@ function RoundManager:OnInit()
 	NotificationManager = require(script.Parent.NotificationManager)
 	PlayerDataManager = require(script.Parent.PlayerDataManager)
 	SoundManager = require(script.Parent.SoundManager)
+	AFKManager = require(script.Parent.AFKManager)
 end
 
 function RoundManager:OnStart()

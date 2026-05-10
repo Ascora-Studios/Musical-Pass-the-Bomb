@@ -12,6 +12,7 @@ local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer.PlayerGui
 
 --
+local PlayerDataController
 local UIController
 
 --
@@ -39,9 +40,27 @@ function GroupRewardController:_setupUI()
 	UIController:BindButtonClick(holder.Exit, function()
 		UIController:CloseFrame(holder)
 	end, true)
+
+	local function setButtonState(isClaimed: boolean)
+		holder.Claim.UIStroke.Color = isClaimed and Color3.fromRGB(50, 50, 50) or Color3.fromRGB(0, 85, 0)
+		holder.Claim.Title.UIStroke.Color = isClaimed and Color3.fromRGB(50, 50, 50) or Color3.fromRGB(0, 85, 0)
+		holder.Claim.Title.Text = isClaimed and "CLAIMED" or "CLAIM"
+		holder.Claim.CantClaimGradient.Enabled = isClaimed
+		holder.Claim.CanClaimGradient.Enabled = not isClaimed
+	end
+
+	PlayerDataController:GetReplica():andThen(function(replica)
+		local hasClaimedReward = replica.Data.ClaimedGroupReward
+		setButtonState(hasClaimedReward)
+
+		replica:OnSet({ "ClaimedGroupReward" }, function(newClaimedReward)
+			setButtonState(newClaimedReward)
+		end)
+	end)
 end
 
 function GroupRewardController:OnInit()
+	PlayerDataController = require(script.Parent.PlayerDataController)
 	UIController = require(script.Parent.UIController)
 	self.UI = PlayerGui:WaitForChild("LikeGameUI")
 end

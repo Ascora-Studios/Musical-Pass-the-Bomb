@@ -1,6 +1,7 @@
 local Players = game:GetService("Players")
 
 local GameConfigs = require(script.Parent.Parent.GameConfigs)
+local AFKManager = require(script.Parent.Parent.Parent.AFKManager)
 
 local Stage = {}
 
@@ -48,10 +49,19 @@ function Stage:OnStart(roundManager)
 		refreshCountdown()
 	end)
 
-	self._playerRemovingConn = Players.PlayerRemoving:Connect(function()
-		if #Players:GetPlayers() - 1 < GameConfigs.MIN_PLAYERS_TO_START then
+	self._playerRemovingConn = Players.PlayerRemoving:Connect(function(player: Player)
+		local eligibleCount = #roundManager:GetEligiblePlayers()
+		if not AFKManager:IsAFK(player) then
+			eligibleCount -= 1
+		end
+
+		if eligibleCount < GameConfigs.MIN_PLAYERS_TO_START then
 			pauseCountdown()
 		end
+	end)
+
+	self._afkChangedConn = AFKManager.OnAFKChanged:Connect(function()
+		refreshCountdown()
 	end)
 end
 
@@ -63,6 +73,10 @@ function Stage:OnEnd(roundManager)
 	if self._playerRemovingConn then
 		self._playerRemovingConn:Disconnect()
 		self._playerRemovingConn = nil
+	end
+	if self._afkChangedConn then
+		self._afkChangedConn:Disconnect()
+		self._afkChangedConn = nil
 	end
 	self._endsAt = 0
 	roundManager:SetIntermissionEndsAt(0)

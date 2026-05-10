@@ -14,8 +14,8 @@ local TOTAL_LEADERBOARD_ENTRIES = 25
 
 --
 local LEADERBOARD_DATA = {
-	Currency = DataStoreService:GetOrderedDataStore("RICHEST_LEADERBOARD_V1"),
-	Wins = DataStoreService:GetOrderedDataStore("MOST_WINS_LEADERBOARD_V1"),
+	Currency = DataStoreService:GetOrderedDataStore("RICHEST_LEADERBOARD_V2"),
+	Wins = DataStoreService:GetOrderedDataStore("MOST_WINS_LEADERBOARD_V2"),
 }
 
 --

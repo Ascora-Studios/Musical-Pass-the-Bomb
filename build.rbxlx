@@ -37092,6 +37092,7 @@ local PlayerDataToken = Replica.Token("PlayerData")
 --
 local PlayerDataManager = {
 	OnDataChanged = Signal.new(),
+	_cleanupCallbacks = {},
 	_playerData = {},
 }
 
@@ -37199,6 +37200,14 @@ end
 -- @param key The key (string or table path) to set
 -- @param newValue The new value to set
 function PlayerDataManager:SetPlayerDataKey(player: Player, key: string | table, newValue: any)
+	local normalizedKey = normalizeKey(key)
+	local loadedData = self._playerData[player]
+	if loadedData then
+		loadedData.Replica:Set(normalizedKey, newValue)
+		self.OnDataChanged:Fire(player, normalizedKey[1], newValue)
+		return
+	end
+
 	if not validatePlayer(player) then
 		warn(`Cannot set data for invalid player: {player}`)
 		return
@@ -37206,7 +37215,6 @@ function PlayerDataManager:SetPlayerDataKey(player: Player, key: string | table,
 
 	self:GetPlayerData(player)
 		:andThen(function(playerData, replica)
-			local normalizedKey = normalizeKey(key)
 			replica:Set(normalizedKey, newValue)
 			self.OnDataChanged:Fire(player, normalizedKey[1], newValue)
 		end)
@@ -37358,6 +37366,10 @@ function PlayerDataManager:ListenForChanges(player: Player, key: string, callbac
 	end)
 end
 
+function PlayerDataManager:BindForCleanup(callback: (player: Player) -> ())
+	table.insert(self._cleanupCallbacks, callback)
+end
+
 -- Sets up player data when a player joins
 -- @param player The player to set up
 function PlayerDataManager:_setupPlayer(player: Player)
@@ -37459,6 +37471,13 @@ function PlayerDataManager:_cleanupPlayer(player: Player)
 	local playerData = self._playerData[player]
 
 	if playerData then
+		for _, callback in self._cleanupCallbacks do
+			local success, errorMessage = pcall(callback, player)
+			if not success then
+				warn(`Player data cleanup callback failed for {player.Name}: {errorMessage}`)
+			end
+		end
+
 		playerData.Profile:EndSession()
 		playerData.Replica:Destroy()
 		self._playerData[player] = nil
@@ -39102,7 +39121,9 @@ function RoundManager:_onPlayerLeaving(player: Player)
 	end
 
 	if #self._alive <= 1 then
-		-- RunMatchLoop will detect this and exit naturally
+		-- RunMatchLoop will detect this and exit naturally. The final timer
+		-- clear should not play the music-stopped warning for the winner.
+		self._suppressNextMusicStop = true
 		return
 	end
 
@@ -39336,7 +39357,7 @@ local GameConfigs = {
 	RESPAWN_PRODUCT_ID = "Respawn", -- Products.Data id for the paid respawn developer product
 
 	-- Music / explosion timer
-	MUSIC_DURATION_RANGE = NumberRange.new(5, 15), -- min/max song length (seconds)
+	MUSIC_DURATION_RANGE = NumberRange.new(10, 18), -- min/max song length (seconds)
 	NUKE_TIMER_LOCK_DURATION = 600, -- keeps the normal bomb timer from expiring while the nuke effect plays
 	NUKE_EFFECT_DELAY = 2, -- seconds between the nuke effect firing and the mass elimination
 
@@ -40292,10 +40313,14 @@ local TimeRewardsConfig
 
 --
 local NotificationManager
+local PlayerDataManager
 
 --
 local JOIN_TIME_ATTRIBUTE = "JoinTime"
 local CLAIMED_REWARDS_ATTRIBUTE = "ClaimedTimeRewards"
+local TIME_REWARD_PLAYTIME_KEY = "TimeRewardPlaytime"
+local TIME_REWARD_LAST_RESET_KEY = "TimeRewardLastReset"
+local RESET_INTERVAL = 24 * 60 * 60
 
 --
 local TimeRewardManager = {
@@ -40305,18 +40330,66 @@ local TimeRewardManager = {
 	_claimedRewards = {} :: { [Player]: { [string]: boolean } },
 }
 
-function TimeRewardManager:_syncClaimedRewards(player: Player)
-	if not player:IsDescendantOf(Players) then
-		return
-	end
-
+function TimeRewardManager:_getClaimedRewards(player: Player): { string }
 	local claimedRewards = {}
 	for claimedRewardId in self._claimedRewards[player] or {} do
 		table.insert(claimedRewards, claimedRewardId)
 	end
 	table.sort(claimedRewards)
 
-	player:SetAttribute(CLAIMED_REWARDS_ATTRIBUTE, HttpService:JSONEncode(claimedRewards))
+	return claimedRewards
+end
+
+function TimeRewardManager:_syncClaimedRewards(player: Player)
+	if not player:IsDescendantOf(Players) then
+		return
+	end
+
+	player:SetAttribute(CLAIMED_REWARDS_ATTRIBUTE, HttpService:JSONEncode(self:_getClaimedRewards(player)))
+end
+
+function TimeRewardManager:_setPlaytime(player: Player, playtime: number)
+	local joinTime = workspace:GetServerTimeNow() - playtime
+	self._joinTimes[player] = joinTime
+	player:SetAttribute(JOIN_TIME_ATTRIBUTE, joinTime)
+end
+
+function TimeRewardManager:_resetRewards(player: Player)
+	self._claimedRewards[player] = {}
+	self:_setPlaytime(player, 0)
+	self:_syncClaimedRewards(player)
+
+	PlayerDataManager:SetPlayerDataKey(player, TIME_REWARD_PLAYTIME_KEY, 0)
+	PlayerDataManager:SetPlayerDataKey(player, TIME_REWARD_LAST_RESET_KEY, os.time())
+	PlayerDataManager:SetPlayerDataKey(player, CLAIMED_REWARDS_ATTRIBUTE, {})
+end
+
+function TimeRewardManager:_setupPlayer(player: Player)
+	local hasData, playerData = PlayerDataManager:GetPlayerData(player):await()
+	if not hasData or not player:IsDescendantOf(Players) then
+		return
+	end
+
+	local lastReset = playerData.TimeRewardLastReset
+	if type(lastReset) ~= "number" or lastReset <= 0 or os.time() - lastReset >= RESET_INTERVAL then
+		self:_resetRewards(player)
+	else
+		local playtime = playerData.TimeRewardPlaytime
+		if type(playtime) ~= "number" then
+			playtime = 0
+		end
+
+		local claimedRewards = {}
+		for _, rewardId in playerData.ClaimedTimeRewards or {} do
+			if type(rewardId) == "string" then
+				claimedRewards[rewardId] = true
+			end
+		end
+
+		self._claimedRewards[player] = claimedRewards
+		self:_setPlaytime(player, playtime)
+		self:_syncClaimedRewards(player)
+	end
 end
 
 function TimeRewardManager:AttemptClaimReward(player: Player, rewardId: string)
@@ -40328,6 +40401,16 @@ function TimeRewardManager:AttemptClaimReward(player: Player, rewardId: string)
 	if not rewardConfig then
 		warn(`Time reward '{rewardId}' not found.`)
 		return
+	end
+
+	local hasData, playerData = PlayerDataManager:GetPlayerData(player):await()
+	if not hasData then
+		return
+	end
+
+	local lastReset = playerData.TimeRewardLastReset
+	if type(lastReset) ~= "number" or lastReset <= 0 or os.time() - lastReset >= RESET_INTERVAL then
+		self:_resetRewards(player)
 	end
 
 	local joinTime = self._joinTimes[player]
@@ -40371,6 +40454,9 @@ function TimeRewardManager:AttemptClaimReward(player: Player, rewardId: string)
 	end
 
 	self:_syncClaimedRewards(player)
+	PlayerDataManager:SetPlayerDataKey(player, CLAIMED_REWARDS_ATTRIBUTE, self:_getClaimedRewards(player))
+	PlayerDataManager:SetPlayerDataKey(player, TIME_REWARD_PLAYTIME_KEY, workspace:GetServerTimeNow() - joinTime)
+
 	NotificationManager.NotifyNormalEvent:Fire(player, {
 		`Successfully claimed <font color="#ffd400">{rewardConfig.Title or "time reward"}</font>!`,
 		5,
@@ -40380,22 +40466,25 @@ end
 
 function TimeRewardManager:OnInit()
 	NotificationManager = require(script.Parent.NotificationManager)
+	PlayerDataManager = require(script.Parent.PlayerDataManager)
 	TimeRewardsConfig = require(Shared.Config.TimeRewards)
 
 	for _, player in Players:GetPlayers() do
-		local joinTime = workspace:GetServerTimeNow()
-		player:SetAttribute(JOIN_TIME_ATTRIBUTE, joinTime)
-		player:SetAttribute(CLAIMED_REWARDS_ATTRIBUTE, "[]")
-		self._joinTimes[player] = joinTime
-		self._claimedRewards[player] = {}
+		task.spawn(TimeRewardManager._setupPlayer, self, player)
 	end
 
 	Players.PlayerAdded:Connect(function(player: Player)
-		local joinTime = workspace:GetServerTimeNow()
-		player:SetAttribute(JOIN_TIME_ATTRIBUTE, joinTime)
-		player:SetAttribute(CLAIMED_REWARDS_ATTRIBUTE, "[]")
-		self._joinTimes[player] = joinTime
-		self._claimedRewards[player] = {}
+		self:_setupPlayer(player)
+	end)
+
+	PlayerDataManager:BindForCleanup(function(player: Player)
+		local joinTime = self._joinTimes[player]
+		if not joinTime then
+			return
+		end
+
+		PlayerDataManager:SetPlayerDataKey(player, TIME_REWARD_PLAYTIME_KEY, workspace:GetServerTimeNow() - joinTime)
+		PlayerDataManager:SetPlayerDataKey(player, CLAIMED_REWARDS_ATTRIBUTE, self:_getClaimedRewards(player))
 	end)
 
 	Players.PlayerRemoving:Connect(function(player: Player)
@@ -44941,7 +45030,7 @@ function IntroController:RunIntro()
 
 	--
 	humanoid.CameraOffset = Vector3.new(0, 5, 0)
-	task.wait(5.5)
+	task.wait(5)
 
 	--
 	TweenService:Create(dim, TweenInfo.new(2.5, Enum.EasingStyle.Quad), {
@@ -46217,6 +46306,7 @@ function RoundController:OnMatchEnd(winner: { [string]: any }?, _placements: { [
 	local ui = self.GameUI
 	local top = ui.Top
 	local inGame = top.InGame
+	local middle = ui.Middle
 	local winnerFrame = top.Winner
 
 	local winnerName = winner and winner.Name or "none"
@@ -46225,6 +46315,7 @@ function RoundController:OnMatchEnd(winner: { [string]: any }?, _placements: { [
 	workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
 	Spr.target(inGame, 0.7, 2.5, { Position = UDim2.fromScale(0.5, -0.5) })
 	inGame.Title.UIScale.Scale = 1
+	middle.MusicStopped.UIScale.Scale = 0
 
 	self:ToggleGameControls(false)
 	HudController:HideHud()
@@ -47543,6 +47634,7 @@ return TimeRewardController
               <string name="Name">UIController</string>
               <string name="Source"><![CDATA[-- Services
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local StarterGui = game:GetService("StarterGui")
 local Players = game:GetService("Players")
 
 -- Packages
@@ -47773,14 +47865,14 @@ function UIController:OnInit()
 	--
 
 	-- Disable Reset Button
-	--[[task.spawn(function()
+	task.spawn(function()
 		repeat
 			local success = pcall(function()
 				StarterGui:SetCore("ResetButtonCallback", false)
 			end)
 			task.wait(1)
 		until success
-	end)]]
+	end)
 end
 
 function UIController:OnStart() end

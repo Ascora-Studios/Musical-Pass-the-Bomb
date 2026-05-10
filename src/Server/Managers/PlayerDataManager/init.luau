@@ -18,8 +18,8 @@ local ProfileStore = require(ServerPackages.ProfileStore)
 local DataSettings = require(script.DataSettings)
 
 --
-local USE_STUDIO_DATA = false
-local LIVE_DATA_VERSION = "PLAYER_DATA_A1"
+local USE_STUDIO_DATA = true
+local LIVE_DATA_VERSION = "PLAYER_DATA_A2"
 local STUDIO_DATA_VERSION = "PLAYER_DATA_STUDIO_A3"
 local DEFAULT_TIMEOUT = 25
 local DATA_POLL_INTERVAL = 0.1
@@ -30,6 +30,7 @@ local PlayerDataToken = Replica.Token("PlayerData")
 --
 local PlayerDataManager = {
 	OnDataChanged = Signal.new(),
+	_cleanupCallbacks = {},
 	_playerData = {},
 }
 
@@ -137,6 +138,14 @@ end
 -- @param key The key (string or table path) to set
 -- @param newValue The new value to set
 function PlayerDataManager:SetPlayerDataKey(player: Player, key: string | table, newValue: any)
+	local normalizedKey = normalizeKey(key)
+	local loadedData = self._playerData[player]
+	if loadedData then
+		loadedData.Replica:Set(normalizedKey, newValue)
+		self.OnDataChanged:Fire(player, normalizedKey[1], newValue)
+		return
+	end
+
 	if not validatePlayer(player) then
 		warn(`Cannot set data for invalid player: {player}`)
 		return
@@ -144,7 +153,6 @@ function PlayerDataManager:SetPlayerDataKey(player: Player, key: string | table,
 
 	self:GetPlayerData(player)
 		:andThen(function(playerData, replica)
-			local normalizedKey = normalizeKey(key)
 			replica:Set(normalizedKey, newValue)
 			self.OnDataChanged:Fire(player, normalizedKey[1], newValue)
 		end)
@@ -296,6 +304,12 @@ function PlayerDataManager:ListenForChanges(player: Player, key: string, callbac
 	end)
 end
 
+-- Binds a callback to be called when a player leaves
+-- @param callback The callback to call when a player leaves
+function PlayerDataManager:BindForCleanup(callback: (player: Player) -> ())
+	table.insert(self._cleanupCallbacks, callback)
+end
+
 -- Sets up player data when a player joins
 -- @param player The player to set up
 function PlayerDataManager:_setupPlayer(player: Player)
@@ -397,6 +411,13 @@ function PlayerDataManager:_cleanupPlayer(player: Player)
 	local playerData = self._playerData[player]
 
 	if playerData then
+		for _, callback in self._cleanupCallbacks do
+			local success, errorMessage = pcall(callback, player)
+			if not success then
+				warn(`Player data cleanup callback failed for {player.Name}: {errorMessage}`)
+			end
+		end
+
 		playerData.Profile:EndSession()
 		playerData.Replica:Destroy()
 		self._playerData[player] = nil
