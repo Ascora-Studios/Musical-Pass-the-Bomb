@@ -397,7 +397,9 @@ function RoundController:OnMatchStart()
 	bomb.Parent = workspace.Main
 	self._bomb = bomb
 
-	local player = Players:GetPlayerByUserId(self:GetBombHolderUserId())
+	local bombHolder = self:GetBombHolderUserId()
+	local player = bombHolder and Players:GetPlayerByUserId(bombHolder)
+
 	if player then
 		self:OnBombPassed(player, true, nil)
 	end
