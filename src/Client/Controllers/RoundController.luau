@@ -426,53 +426,62 @@ function RoundController:OnPreElimination(victimInfo: { [string]: any }?)
 		return
 	end
 
-	task.wait(1.5)
+	self._gameCleaner:Add(task.delay(1.5, function()
+		if not player.Parent then
+			return
+		end
 
-	local character = player.Character
-	if not character or not character.Parent then
-		return
-	end
+		local character = player.Character
+		if not character or not character.Parent then
+			return
+		end
 
-	local camera = workspace.CurrentCamera
+		local camera = workspace.CurrentCamera
 
-	SoundController:PlaySound("OnEliminated")
+		SoundController:PlaySound("OnEliminated")
 
-	if self:IsInMatch() then
-		camera.CameraType = Enum.CameraType.Scriptable
-		camera.CFrame = character:GetPivot()
-			* CFrame.new(0, 5, -15)
-			* CFrame.Angles(0, math.rad(180), 0)
-			* CFrame.Angles(math.rad(-15), 0, 0)
+		if self:IsInMatch() then
+			camera.CameraType = Enum.CameraType.Scriptable
+			camera.CFrame = character:GetPivot()
+				* CFrame.new(0, 5, -15)
+				* CFrame.Angles(0, math.rad(180), 0)
+				* CFrame.Angles(math.rad(-15), 0, 0)
 
-		local tween = TweenService:Create(camera, TweenInfo.new(5), { CFrame = camera.CFrame * CFrame.new(0, 0, -5) })
-		tween:Play()
+			local tween =
+				TweenService:Create(camera, TweenInfo.new(5), { CFrame = camera.CFrame * CFrame.new(0, 0, -5) })
+			tween:Play()
 
-		self._gameCleaner:Add(function()
-			if tween then
-				tween:Cancel()
+			local function resetCamera()
+				if tween then
+					tween:Cancel()
+					tween = nil
+				end
+				camera.CameraType = Enum.CameraType.Custom
 			end
+
+			self._gameCleaner:Add(player.Destroying:Once(resetCamera))
+			self._gameCleaner:Add(resetCamera)
+		end
+
+		task.delay(1, function()
+			local eliminatedNotificationText = notification.EliminatedNotification:Clone()
+			eliminatedNotificationText.Title.UIScale.Scale = 0
+			eliminatedNotificationText.Title.Text = `{name:upper()} HAS BEEN ELIMINATED!`
+			eliminatedNotificationText.Visible = true
+			eliminatedNotificationText.Parent = notification
+
+			eliminatedNotificationText.Title:SetAttribute("Amplitude", 1)
+			eliminatedNotificationText.Title:AddTag("UISway")
+
+			Spr.target(eliminatedNotificationText.Title.UIScale, 0.7, 2.5, { Scale = 1 })
+
+			task.delay(3, function()
+				Spr.target(eliminatedNotificationText.Title.UIScale, 0.7, 2.5, { Scale = 0 })
+				task.wait(3)
+				eliminatedNotificationText:Destroy()
+			end)
 		end)
-	end
-
-	--
-	task.delay(1, function()
-		local eliminatedNotificationText = notification.EliminatedNotification:Clone()
-		eliminatedNotificationText.Title.UIScale.Scale = 0
-		eliminatedNotificationText.Title.Text = `{name:upper()} HAS BEEN ELIMINATED!`
-		eliminatedNotificationText.Visible = true
-		eliminatedNotificationText.Parent = notification
-
-		eliminatedNotificationText.Title:SetAttribute("Amplitude", 1)
-		eliminatedNotificationText.Title:AddTag("UISway")
-
-		Spr.target(eliminatedNotificationText.Title.UIScale, 0.7, 2.5, { Scale = 1 })
-
-		task.delay(3, function()
-			Spr.target(eliminatedNotificationText.Title.UIScale, 0.7, 2.5, { Scale = 0 })
-			task.wait(3)
-			eliminatedNotificationText:Destroy()
-		end)
-	end)
+	end))
 end
 
 -- Called right after an elimination and before survivors are re-circled
