@@ -68,6 +68,7 @@
 -- Services
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 local SoundService = game:GetService("SoundService")
 local StarterPlayers = game:GetService("StarterPlayer")
 
@@ -113,6 +114,8 @@ local RoundManager = {
 	OnBombPassed = Signal.new(), -- (fromPlayer, toPlayer, direction)
 	OnMusicCycleStarted = Signal.new(), -- (timestamp, duration)
 	OnMusicCycleStopped = Signal.new(),
+	OnLastRoundStarted = Signal.new(), -- (players: { Player })
+	OnLastRoundEnded = Signal.new(),
 
 	-- BridgeNet2 events
 	SyncExplosionTimeEvent = BridgeNet2.ReferenceBridge("SyncExplosionTime"),
@@ -120,6 +123,8 @@ local RoundManager = {
 	PlayerEliminatedEvent = BridgeNet2.ReferenceBridge("PlayerEliminated"),
 	PostEliminationEvent = BridgeNet2.ReferenceBridge("PostElimination"),
 	MatchEndEvent = BridgeNet2.ReferenceBridge("MatchEnd"),
+	LastRoundCountdownEvent = BridgeNet2.ReferenceBridge("LastRoundCountdown"),
+	LastRoundStartedEvent = BridgeNet2.ReferenceBridge("LastRoundStarted"),
 	EliminationChoicePromptEvent = BridgeNet2.ReferenceBridge("EliminationChoicePrompt"),
 	EliminationChoiceResolvedEvent = BridgeNet2.ReferenceBridge("EliminationChoiceResolved"),
 	EliminationChoiceRequestEvent = BridgeNet2.ReferenceBridge("EliminationChoiceRequest"),
@@ -150,6 +155,12 @@ RoundManager._suppressNextMusicStop = false
 RoundManager._pendingChoices =
 	{} :: { [Player]: { Resolved: boolean, Thread: thread?, PurchasePending: boolean?, ProductId: string? } }
 RoundManager._eliminationBoardTitle = nil :: TextLabel?
+RoundManager._lastRoundActive = false
+RoundManager._lastRoundResolved = false
+RoundManager._lastRoundScaleThread = nil :: thread?
+RoundManager._lastRoundHitPart = nil :: BasePart?
+RoundManager._lastRoundTouchConnection = nil :: RBXScriptConnection?
+RoundManager._arenaOriginalScale = 1
 
 ----------------------------------------------------------------
 -- Helpers
@@ -535,7 +546,7 @@ function RoundManager:_eliminate(player: Player, suppressChoicePrompt: boolean?)
 	end
 
 	-- Decide what happens to the eliminated player after the explosion / ragdoll.
-	if #self._alive >= GameConfigs.ELIMINATION_CHOICE_MIN_REMAINING then
+	if #self._alive > GameConfigs.ELIMINATION_CHOICE_MIN_REMAINING then
 		-- The match had more than 2 players before this elimination, so let the
 		-- eliminated player pick LEAVE / RESPAWN.
 		self:_promptEliminationChoice(player)
@@ -1010,6 +1021,10 @@ function RoundManager:IsMatchActive(): boolean
 	return self._matchActive and self._currentStageName == "Match"
 end
 
+function RoundManager:IsLastRoundActive(): boolean
+	return self:IsMatchActive() and self._lastRoundActive and not self._lastRoundResolved
+end
+
 function RoundManager:IsPlayerAlive(player: Player): boolean
 	return indexOf(self._alive, player) ~= nil
 end
@@ -1220,6 +1235,171 @@ function RoundManager:_consumeReflect(target: Player, from: Player): boolean
 	return true
 end
 
+----------------------------------------------------------------
+-- Last round brawl
+----------------------------------------------------------------
+
+-- Ends the final brawl state and lets brawl-only systems clean up.
+function RoundManager:_endLastRound()
+	if not self._lastRoundActive and self._lastRoundResolved then
+		return
+	end
+
+	local wasActive = self._lastRoundActive
+	self._lastRoundActive = false
+	self._lastRoundResolved = true
+
+	if wasActive then
+		self.OnLastRoundEnded:Fire()
+	end
+end
+
+-- Shows or hides the final brawl hit part and its texture markers.
+function RoundManager:_setLastRoundHitPartVisible(isVisible: boolean)
+	local hitPart = self._lastRoundHitPart
+	if not hitPart then
+		return
+	end
+
+	hitPart.Transparency = if isVisible then 0 else 1
+	hitPart.CanTouch = isVisible
+
+	for _, descendant in hitPart:GetDescendants() do
+		if descendant:IsA("Texture") then
+			descendant.Transparency = if isVisible then 0 else 1
+		end
+	end
+end
+
+-- Restores last-round arena state so the next match starts from the full arena.
+function RoundManager:_resetLastRoundArena()
+	self:_endLastRound()
+
+	if self._lastRoundScaleThread then
+		task.cancel(self._lastRoundScaleThread)
+		self._lastRoundScaleThread = nil
+	end
+
+	local arena = workspace.Main:FindFirstChild("Arena")
+	if arena and arena:IsA("Model") then
+		arena:ScaleTo(self._arenaOriginalScale)
+	end
+
+	self:_setLastRoundHitPartVisible(false)
+	self._lastRoundResolved = false
+end
+
+-- Shrinks the arena model over the configured duration using Model:ScaleTo().
+function RoundManager:_startLastRoundArenaScale()
+	if self._lastRoundScaleThread then
+		task.cancel(self._lastRoundScaleThread)
+	end
+
+	local arena = workspace.Main:FindFirstChild("Arena")
+	if not arena or not arena:IsA("Model") then
+		warn("[RoundManager] Arena model workspace.Main.Arena not found; cannot scale last round arena")
+		return
+	end
+
+	local startScale = arena:GetScale()
+	local targetScale = GameConfigs.LAST_ROUND_ARENA_TARGET_SCALE
+	local duration = GameConfigs.LAST_ROUND_ARENA_SCALE_DURATION
+
+	self._lastRoundScaleThread = task.spawn(function()
+		local startedAt = os.clock()
+		while self._lastRoundActive do
+			local alpha = if duration > 0 then math.clamp((os.clock() - startedAt) / duration, 0, 1) else 1
+			arena:ScaleTo(startScale + (targetScale - startScale) * alpha)
+
+			if alpha >= 1 then
+				break
+			end
+
+			RunService.Heartbeat:Wait()
+		end
+
+		self._lastRoundScaleThread = nil
+	end)
+end
+
+-- Starts the final 1v1 brawl and yields until a winner can be resolved.
+function RoundManager:_startLastRoundBrawl()
+	if self._lastRoundActive or self._lastRoundResolved then
+		return
+	end
+
+	if not self._lastRoundHitPart then
+		warn("[RoundManager] Last round brawl skipped because LastRoundHitPart is missing")
+		return
+	end
+
+	self._lastRoundActive = true
+	self._lastRoundResolved = false
+	self._passesLocked = true
+	self._suppressNextMusicStop = true
+	self:_stopMusicCycle(true)
+
+	if BombManager then
+		BombManager:SetHolder(nil)
+	end
+
+	for secondsLeft = GameConfigs.LAST_ROUND_COUNTDOWN, 0, -1 do
+		self.LastRoundCountdownEvent:Fire(BridgeNet2.AllPlayers(), {
+			SecondsLeft = secondsLeft,
+		})
+
+		if secondsLeft > 0 then
+			task.wait(1)
+		end
+	end
+
+	if #self._alive ~= 2 then
+		self:_resetLastRoundArena()
+		return
+	end
+
+	local lastRoundPlayers = {
+		self._alive[1],
+		self._alive[2],
+	}
+
+	self.LastRoundStartedEvent:Fire(BridgeNet2.AllPlayers(), {
+		Players = {
+			serializePlayer(lastRoundPlayers[1]),
+			serializePlayer(lastRoundPlayers[2]),
+		},
+	})
+	self.OnLastRoundStarted:Fire(lastRoundPlayers)
+
+	for _, player in self._alive do
+		resetPlayerMovement(player)
+	end
+
+	self:_setLastRoundHitPartVisible(true)
+	self:_startLastRoundArenaScale()
+
+	while self._matchActive and self._lastRoundActive and not self._lastRoundResolved and #self._alive == 2 do
+		task.wait()
+	end
+end
+
+-- Eliminates the first finalist who touches the brawl hit part.
+function RoundManager:_handleLastRoundHit(hit: BasePart)
+	if not self._lastRoundActive or self._lastRoundResolved then
+		return
+	end
+
+	local character = hit:FindFirstAncestorOfClass("Model")
+	local player = character and Players:GetPlayerFromCharacter(character)
+	if not player or not indexOf(self._alive, player) then
+		return
+	end
+
+	self:_endLastRound()
+	self:_setLastRoundHitPartVisible(false)
+	self:_eliminate(player, true)
+end
+
 -- Stage hook: called from InitMatch
 function RoundManager:StartMatch(): boolean
 	self._alive = self:GetEligiblePlayers()
@@ -1233,6 +1413,7 @@ function RoundManager:StartMatch(): boolean
 	self._suppressNextMusicStop = false
 	self:_clearLockTarget(false)
 	self._eliminationBoardTitle.Text = ""
+	self:_resetLastRoundArena()
 
 	self:_setReplicaValue("Placements", {})
 
@@ -1256,7 +1437,7 @@ function RoundManager:StartMatch(): boolean
 		setPlayerMovement(player, GameConfigs.MATCH_WALKSPEED, GameConfigs.MATCH_JUMPPOWER)
 	end
 
-	if BombManager then
+	if BombManager and #self._alive > 2 then
 		self:_assignRandomBombHolder()
 	end
 
@@ -1281,6 +1462,17 @@ function RoundManager:RunMatchLoop()
 		return
 	end
 
+	if #self._alive == 2 then
+		self:_startLastRoundBrawl()
+		if #self._alive <= 1 then
+			self._matchActive = false
+			local suppressClientMusicStop = self._suppressNextMusicStop
+			self._suppressNextMusicStop = false
+			self:_stopMusicCycle(suppressClientMusicStop)
+			return
+		end
+	end
+
 	if not BombManager:GetHolder() then
 		self:_assignRandomBombHolder()
 	end
@@ -1303,6 +1495,26 @@ function RoundManager:RunMatchLoop()
 
 		if #self._alive <= 1 then
 			break
+		end
+
+		if #self._alive == 2 and not self._lastRoundActive and not self._lastRoundResolved then
+			self:_teleportPlayersToCircle()
+			self:_startLastRoundBrawl()
+			if #self._alive <= 1 then
+				break
+			end
+			if #self._alive > 2 and self._explosionTimestamp <= 0 then
+				if not BombManager:GetHolder() then
+					self:_assignRandomBombHolder()
+				end
+				self._passesLocked = false
+				self:_startMusicCycle(
+					RandomUtil.GetRandomFromMinMax(
+						GameConfigs.MUSIC_DURATION_RANGE.Min,
+						GameConfigs.MUSIC_DURATION_RANGE.Max
+					)
+				)
+			end
 		end
 
 		if self:_isMusicTimerExpired() then
@@ -1340,6 +1552,24 @@ function RoundManager:RunMatchLoop()
 
 			if #self._alive <= 1 then
 				break
+			end
+
+			if #self._alive == 2 then
+				if victimEliminated then
+					self.PostEliminationEvent:Fire(BridgeNet2.AllPlayers(), {
+						RemainingCount = #self._alive,
+					})
+
+					task.wait(GameConfigs.POST_ELIMINATION_GRACE)
+				end
+
+				self:_teleportPlayersToCircle()
+				self:_startLastRoundBrawl()
+				if #self._alive <= 1 then
+					break
+				end
+
+				continue
 			end
 
 			if victimEliminated then
@@ -1440,6 +1670,7 @@ function RoundManager:FinalizeMatch()
 	self._nukeActive = false
 	self._suppressNextMusicStop = false
 	self:_clearLockTarget(false)
+	self:_resetLastRoundArena()
 	self._eliminationBoardTitle.Text = ""
 	self:_publishAliveList()
 	if BombManager then
@@ -1489,6 +1720,12 @@ function RoundManager:_onPlayerLeaving(player: Player)
 	table.insert(self._placements, 1, player.UserId)
 	self:_publishAliveList()
 
+	NotificationManager.NotifyNormalEvent:Fire(BridgeNet2.AllPlayers(), {
+		`<font color="#ff0000">{player.Name}</font> left the game`,
+		3,
+		"Notify",
+	})
+
 	if wasHolder and BombManager then
 		-- Clear, then (if there are survivors) reassign immediately. No
 		-- elimination, no reward — they just left.
@@ -1499,11 +1736,29 @@ function RoundManager:_onPlayerLeaving(player: Player)
 		-- RunMatchLoop will detect this and exit naturally. The final timer
 		-- clear should not play the music-stopped warning for the winner.
 		self._suppressNextMusicStop = true
+		if self._lastRoundActive then
+			self:_endLastRound()
+			self:_setLastRoundHitPartVisible(false)
+		end
 		return
 	end
 
 	-- Re-arrange survivors into a fresh circle after the disconnect
 	self:_teleportPlayersToCircle()
+
+	if #self._alive == 2 then
+		self.PostEliminationEvent:Fire(BridgeNet2.AllPlayers(), {
+			RemainingCount = #self._alive,
+		})
+
+		self._passesLocked = true
+		self._suppressNextMusicStop = true
+		self:_stopMusicCycle(true)
+		if BombManager then
+			BombManager:SetHolder(nil)
+		end
+		return
+	end
 
 	if wasHolder then
 		self:_assignRandomBombHolder()
@@ -1613,6 +1868,22 @@ function RoundManager:OnInit()
 	self._eliminationBoardTitle = workspace.Main.EliminationBoard.Board.EliminationUI.Title
 	self._eliminationBoardTitle.RichText = true
 	self._eliminationBoardTitle.Text = ""
+
+	local arena = workspace.Main:FindFirstChild("Arena")
+	if arena and arena:IsA("Model") then
+		self._arenaOriginalScale = arena:GetScale()
+	end
+
+	local lastRoundHitPart = workspace.Main:FindFirstChild("LastRoundHitPart")
+	if lastRoundHitPart and lastRoundHitPart:IsA("BasePart") then
+		self._lastRoundHitPart = lastRoundHitPart
+		self:_setLastRoundHitPartVisible(false)
+		self._lastRoundTouchConnection = lastRoundHitPart.Touched:Connect(function(hit: BasePart)
+			self:_handleLastRoundHit(hit)
+		end)
+	else
+		warn("[RoundManager] workspace.Main.LastRoundHitPart not found; final brawl touch elimination disabled")
+	end
 
 	self._roundReplica = Replica.New({
 		Token = ROUND_DATA_TOKEN,

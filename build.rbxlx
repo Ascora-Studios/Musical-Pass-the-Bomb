@@ -33880,6 +33880,9 @@ end
           <string name="Name">Animations</string>
           <string name="Source"><![CDATA[return {
 	HoldBomb = "rbxassetid://74394491017385",
+	Punch1 = "rbxassetid://84814960153965",
+	Punch2 = "rbxassetid://134999406878905",
+	PunchIdle = "rbxassetid://89057306095635",
 }
 ]]></string>
         </Properties>
@@ -34954,6 +34957,133 @@ return GuiUtil
       </Item>
       <Item class="ModuleScript" referent="384">
         <Properties>
+          <string name="Name">Hitbox</string>
+          <string name="Source"><![CDATA[-- Constants
+local DEBUG_MODE = false
+local DEBUG_DELAY = 0.1
+
+local Hitbox = {}
+
+-- Helper function to extract character models from overlapping parts
+-- @param parts Array of parts that were hit
+-- @param ignoreHits Models to ignore
+-- @returns Array of unique character models
+local function extractCharacters(parts: { BasePart }, ignoreHits: { Model }?): { Model }
+	local characterHits = {}
+
+	for _, part in parts do
+		local character = part:FindFirstAncestorOfClass("Model")
+
+		if character and character:FindFirstChild("Humanoid") then
+			-- Check if character should be ignored
+			local shouldIgnore = false
+			if ignoreHits then
+				shouldIgnore = table.find(ignoreHits, character) ~= nil
+			end
+
+			-- Add character if not ignored and not already in list
+			if not shouldIgnore and not table.find(characterHits, character) then
+				table.insert(characterHits, character)
+			end
+		end
+	end
+
+	return characterHits
+end
+
+-- Helper function to create overlap parameters
+-- @param ignoreHits Models to ignore in the hit detection
+-- @returns OverlapParams configured for exclusion
+local function createOverlapParams(ignoreHits: { Model }?): OverlapParams
+	local params = OverlapParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+
+	if ignoreHits then
+		params.FilterDescendantsInstances = ignoreHits
+	end
+
+	return params
+end
+
+-- Attempts to get all the character models within a given hitbox
+-- @param cframe The CFrame position and rotation of the hitbox (or offset if bindToPart is provided)
+-- @param size The Vector3 size of the hitbox
+-- @param ignoreHits Optional array of character models to ignore
+-- @param bindToPart Optional BasePart to weld the hitbox to (if provided, cframe is used as C0 offset)
+-- @returns Array of character models that were hit
+function Hitbox.Hit(cframe: CFrame, size: Vector3, ignoreHits: { Model }?, bindToPart: BasePart?): { Model }
+	-- Create temporary hitbox part
+	local hitbox = Instance.new("Part")
+	hitbox.Transparency = DEBUG_MODE and 0.5 or 1
+	hitbox.CanCollide = false
+	hitbox.Size = size
+
+	local weld: Weld? = nil
+
+	if bindToPart and bindToPart:IsA("BasePart") then
+		-- Bind hitbox to part using weld
+		hitbox.Anchored = false
+		hitbox.Massless = true
+		hitbox.Parent = bindToPart
+
+		-- Create weld to bind hitbox to the part
+		weld = Instance.new("Weld")
+		weld.Part0 = bindToPart
+		weld.Part1 = hitbox
+		weld.C0 = cframe -- Use cframe as the offset
+		weld.Parent = hitbox
+	else
+		-- Place hitbox in workspace at specified position
+		hitbox.Anchored = true
+		hitbox.CFrame = cframe
+		hitbox.Parent = workspace
+	end
+
+	-- Get overlapping parts
+	local params = createOverlapParams(ignoreHits)
+	local overlappingParts = workspace:GetPartsInPart(hitbox, params)
+
+	-- Extract character models from overlapping parts
+	local characterHits = extractCharacters(overlappingParts, ignoreHits)
+
+	-- Clean up hitbox part and weld
+	local delay = DEBUG_MODE and DEBUG_DELAY or 0
+	task.delay(delay, function()
+		if weld and weld.Parent then
+			weld:Destroy()
+		end
+		if hitbox and hitbox.Parent then
+			hitbox:Destroy()
+		end
+	end)
+
+	return characterHits
+end
+
+-- Attempts to get all the character models within a given part's bounds
+-- @param part The BasePart to use as the hitbox
+-- @param ignoreHits Optional array of character models to ignore
+-- @returns Array of character models that were hit
+function Hitbox.HitWithPart(part: BasePart, ignoreHits: { Model }?): { Model }
+	if not part or not part:IsA("BasePart") then
+		warn("Hitbox.HitWithPart: Invalid part provided")
+		return {}
+	end
+
+	-- Get overlapping parts using the provided part
+	local params = createOverlapParams(ignoreHits)
+	local overlappingParts = workspace:GetPartsInPart(part, params)
+
+	-- Extract character models from overlapping parts
+	return extractCharacters(overlappingParts, ignoreHits)
+end
+
+return Hitbox
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="385">
+        <Properties>
           <string name="Name">MathUtil</string>
           <string name="Source"><![CDATA[local MathUtil = {}
 
@@ -34985,7 +35115,7 @@ return MathUtil
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="385">
+      <Item class="ModuleScript" referent="386">
         <Properties>
           <string name="Name">RagdollShared</string>
           <string name="Source"><![CDATA[-- Services
@@ -35080,7 +35210,7 @@ return RagdollShared
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="386">
+      <Item class="ModuleScript" referent="387">
         <Properties>
           <string name="Name">RandomUtil</string>
           <string name="Source"><![CDATA[local RandomUtil = {}
@@ -35223,24 +35353,184 @@ return RandomUtil
       </Item>
     </Item>
   </Item>
-  <Item class="ServerScriptService" referent="387">
+  <Item class="ServerScriptService" referent="388">
     <Properties>
       <string name="Name">ServerScriptService</string>
     </Properties>
-    <Item class="Folder" referent="388">
+    <Item class="Folder" referent="389">
       <Properties>
         <string name="Name">Server</string>
       </Properties>
-      <Item class="Folder" referent="389">
+      <Item class="Folder" referent="390">
         <Properties>
           <string name="Name">Components</string>
         </Properties>
       </Item>
-      <Item class="Folder" referent="390">
+      <Item class="Folder" referent="391">
+        <Properties>
+          <string name="Name">Config</string>
+        </Properties>
+        <Item class="ModuleScript" referent="392">
+          <Properties>
+            <string name="Name">FreeGift</string>
+            <string name="Source"><![CDATA[-- Services
+local AnalyticsService = game:GetService("AnalyticsService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+--
+local Shared = ReplicatedStorage.Shared
+local RandomUtil = require(Shared.RandomUtil)
+
+-- Managers
+local Managers = script.Parent.Parent.Managers
+
+local PlayerDataManager = require(Managers.PlayerDataManager)
+local NotificationManager = require(Managers.NotificationManager)
+local CurrencyManager = require(Managers.CurrencyManager)
+
+export type FreeGift = {
+	Id: string,
+	Chance: number,
+	Callback: (player: Player) -> (),
+}
+
+--
+return {
+	{
+		Id = "Coins",
+		Chance = 100,
+		Callback = function(player: Player)
+			local randomAmount = RandomUtil.GetRandomIntFromMinMax(50, 80)
+
+			CurrencyManager:IncrementCurrency(player, randomAmount)
+			NotificationManager.NotifyNormalEvent:Fire(player, {
+				`You received <font color="#ffd400">{randomAmount} Coins</font> from the free gift!`,
+				5,
+				"CollectedReward",
+			})
+
+			-- Analytics
+			task.spawn(function()
+				pcall(function()
+					PlayerDataManager:GetPlayerDataKey(player, "Currency"):andThen(function(currency)
+						AnalyticsService:LogEconomyEvent(
+							player,
+							Enum.AnalyticsEconomyFlowType.Source,
+							"Coins",
+							randomAmount,
+							currency,
+							Enum.AnalyticsEconomyTransactionType.TimedReward.Name,
+							"FreeGift"
+						)
+					end)
+				end)
+			end)
+		end,
+	},
+} :: { FreeGift }
+]]></string>
+          </Properties>
+        </Item>
+      </Item>
+      <Item class="Folder" referent="393">
         <Properties>
           <string name="Name">Managers</string>
         </Properties>
-        <Item class="ModuleScript" referent="391">
+        <Item class="ModuleScript" referent="394">
+          <Properties>
+            <string name="Name">AFKManager</string>
+            <string name="Source"><![CDATA[-- Services
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+-- Packages
+local Packages = ReplicatedStorage.Packages
+local BridgeNet2 = require(Packages.BridgeNet2)
+local Signal = require(Packages.Signal)
+
+--
+local NotificationManager
+
+--
+local AFK_ATTRIBUTE = "IsAFK"
+local REQUEST_COOLDOWN_SECONDS = 1.5
+
+--
+local AFKManager = {
+	ToggleAFKEvent = BridgeNet2.ReferenceBridge("ToggleAFK"),
+	OnAFKChanged = Signal.new(),
+
+	_afkPlayers = {} :: { [Player]: boolean },
+	_requestCooldowns = {} :: { [Player]: number },
+}
+
+function AFKManager:IsAFK(player: Player): boolean
+	return self._afkPlayers[player] == true
+end
+
+function AFKManager:SetAFK(player: Player, isAFK: boolean)
+	if typeof(isAFK) ~= "boolean" or not player:IsDescendantOf(Players) then
+		return
+	end
+
+	local wasAFK = self._afkPlayers[player] == true
+	self._afkPlayers[player] = isAFK
+	player:SetAttribute(AFK_ATTRIBUTE, isAFK)
+
+	if isAFK then
+		NotificationManager.NotifyNormalEvent:Fire(player, { "You are now AFK, You won't join the next match!", 3 })
+	else
+		NotificationManager.NotifyNormalEvent:Fire(
+			player,
+			{ "You are no longer AFK, You will join the next match!", 3 }
+		)
+	end
+
+	if wasAFK ~= isAFK then
+		self.OnAFKChanged:Fire(player, isAFK)
+	end
+end
+
+function AFKManager:ToggleAFK(player: Player)
+	self:SetAFK(player, not self:IsAFK(player))
+end
+
+function AFKManager:OnInit()
+	NotificationManager = require(script.Parent.NotificationManager)
+end
+
+function AFKManager:OnStart()
+	for _, player in Players:GetPlayers() do
+		self._afkPlayers[player] = false
+		player:SetAttribute(AFK_ATTRIBUTE, false)
+	end
+
+	Players.PlayerAdded:Connect(function(player: Player)
+		self._afkPlayers[player] = false
+		player:SetAttribute(AFK_ATTRIBUTE, false)
+	end)
+
+	Players.PlayerRemoving:Connect(function(player: Player)
+		self._afkPlayers[player] = nil
+		self._requestCooldowns[player] = nil
+	end)
+
+	self.ToggleAFKEvent:Connect(function(player: Player)
+		local now = workspace:GetServerTimeNow()
+		if now < (self._requestCooldowns[player] or 0) then
+			return
+		end
+
+		self._requestCooldowns[player] = now + REQUEST_COOLDOWN_SECONDS
+		self:ToggleAFK(player)
+	end)
+end
+
+return AFKManager
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="395">
           <Properties>
             <string name="Name">AbilitiesManager</string>
             <string name="Source"><![CDATA[-- Services
@@ -35824,7 +36114,7 @@ return AbilitiesManager
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="392">
+        <Item class="ModuleScript" referent="396">
           <Properties>
             <string name="Name">AnalyticsManager</string>
             <string name="Source"><![CDATA[-- Services
@@ -35917,7 +36207,7 @@ return AnalyticsManager
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="393">
+        <Item class="ModuleScript" referent="397">
           <Properties>
             <string name="Name">BadgeManager</string>
             <string name="Source"><![CDATA[-- Services
@@ -36099,7 +36389,7 @@ function BadgeManager:OnStart() end
 return BadgeManager
 ]]></string>
           </Properties>
-          <Item class="ModuleScript" referent="394">
+          <Item class="ModuleScript" referent="398">
             <Properties>
               <string name="Name">Badges</string>
               <string name="Source"><![CDATA[-- Services
@@ -36134,7 +36424,7 @@ local Badges = {}
 
 Badges.Data = {
 	{
-		Name = "Welcome!",
+		Name = "Welcome",
 		Key = "FirstJoin",
 		BadgeId = 931604781514469,
 		OnInitCallback = function(toAwardCallback: (player: Player, badgeKey: string) -> ())
@@ -36207,7 +36497,7 @@ return Badges
             </Properties>
           </Item>
         </Item>
-        <Item class="ModuleScript" referent="395">
+        <Item class="ModuleScript" referent="399">
           <Properties>
             <string name="Name">BombManager</string>
             <string name="Source"><![CDATA[--[[
@@ -36315,7 +36605,7 @@ return BombManager
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="396">
+        <Item class="ModuleScript" referent="400">
           <Properties>
             <string name="Name">CodeManager</string>
             <string name="Source"><![CDATA[-- Services
@@ -36414,7 +36704,7 @@ end
 return CodeManager
 ]]></string>
           </Properties>
-          <Item class="ModuleScript" referent="397">
+          <Item class="ModuleScript" referent="401">
             <Properties>
               <string name="Name">Codes</string>
               <string name="Source"><![CDATA[export type Code = {
@@ -36442,7 +36732,7 @@ return Codes
             </Properties>
           </Item>
         </Item>
-        <Item class="ModuleScript" referent="398">
+        <Item class="ModuleScript" referent="402">
           <Properties>
             <string name="Name">CurrencyManager</string>
             <string name="Source"><![CDATA[--
@@ -36496,7 +36786,7 @@ return CurrencyManager
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="399">
+        <Item class="ModuleScript" referent="403">
           <Properties>
             <string name="Name">DailyRewardManager</string>
             <string name="Source"><![CDATA[-- Services
@@ -36652,7 +36942,7 @@ return DailyRewardManager
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="400">
+        <Item class="ModuleScript" referent="404">
           <Properties>
             <string name="Name">EffectManager</string>
             <string name="Source"><![CDATA[-- Services
@@ -36671,7 +36961,162 @@ return EffectManager
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="401">
+        <Item class="ModuleScript" referent="405">
+          <Properties>
+            <string name="Name">FreeGiftManager</string>
+            <string name="Source"><![CDATA[-- Services
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local AnalyticsService = game:GetService("AnalyticsService")
+local ConfigService = game:GetService("ConfigService")
+local Players = game:GetService("Players")
+
+-- Packages
+local Packages = ReplicatedStorage.Packages
+local ZonePlus = require(Packages.ZonePlus)
+
+-- Shared
+local Shared = ReplicatedStorage.Shared
+
+local RandomUtil = require(Shared.RandomUtil)
+local GuiUtil = require(Shared.GuiUtil)
+
+-- Config
+local FreeGiftConfig = require(script.Parent.Parent.Config.FreeGift)
+
+--
+local Obby = workspace.Obby
+
+local GIFT_CLAIM_FREQUENCY = 3 * 60
+
+--
+local NotificationManager
+
+--
+local FreeGiftManager = {
+	_claimTime = {},
+	_playerClaims = {},
+}
+
+--
+function FreeGiftManager:ClaimGift(player: Player)
+	-- Check if the player can claim another gift
+	local claimTime = self._claimTime[player]
+	if workspace:GetServerTimeNow() < claimTime then
+		NotificationManager.NotifyNormalEvent:Fire(player, {
+			`You can claim another gift in <font color="#ffd400">{GuiUtil.ConvertSecondsToMMSS(
+				claimTime - workspace:GetServerTimeNow()
+			)}</font>`,
+			5,
+			"Reject",
+		})
+		return
+	end
+
+	-- Give the gift to the player
+	local freeGiftChances = {}
+	for index, gift in FreeGiftConfig do
+		table.insert(freeGiftChances, { index, gift.Chance })
+	end
+
+	local randomGift: FreeGiftConfig.FreeGift = RandomUtil.GetResultFromWeight(freeGiftChances)
+	local giftData = FreeGiftConfig[randomGift]
+
+	giftData.Callback(player)
+
+	-- Set the claim time for the player
+	local newClaimTime = workspace:GetServerTimeNow() + player:GetAttribute("GiftWaitTime")
+	self._claimTime[player] = newClaimTime
+	player:SetAttribute("GiftClaimTime", newClaimTime)
+
+	self._playerClaims[player] = (self._playerClaims[player] or 0) + 1
+
+	--
+	AnalyticsService:LogCustomEvent(player, "Claimed Free Gift", 1, {
+		[Enum.AnalyticsCustomFieldKeys.CustomField01.Name] = giftData.Id,
+		[Enum.AnalyticsCustomFieldKeys.CustomField02.Name] = tostring(self._playerClaims[player]),
+	})
+end
+
+-- Setups the gift
+function FreeGiftManager:_setupGift()
+	-- Setup the zone for the gift
+	local giftZone = ZonePlus.new(Obby.Hitbox)
+	giftZone.playerEntered:Connect(function(player: Player)
+		self:ClaimGift(player)
+	end)
+
+	-- Setup the time for player to claim the gift
+	local function setupPlayer(player: Player)
+		--local success, waitingTime = pcall(function()
+		--	local playerConfig = ConfigService:GetConfigForPlayerAsync(player)
+		--	return playerConfig:GetValue("FreeGiftTime")
+		--end)
+
+		--if success then
+		--	waitingTime = waitingTime * 60
+		--else
+		--	waitingTime = GameConfigs.GIFT_CLAIM_FREQUENCY
+		--end
+		player:SetAttribute("GiftWaitTime", GIFT_CLAIM_FREQUENCY)
+
+		local claimTime = workspace:GetServerTimeNow() + 10
+		player:SetAttribute("GiftClaimTime", claimTime)
+		self._claimTime[player] = claimTime
+	end
+
+	Players.PlayerAdded:Connect(function(player)
+		setupPlayer(player)
+	end)
+
+	Players.PlayerRemoving:Connect(function(player)
+		self._claimTime[player] = nil
+		self._playerClaims[player] = nil
+	end)
+
+	for _, player in Players:GetPlayers() do
+		setupPlayer(player)
+	end
+end
+
+--
+function FreeGiftManager:_setupObbyAntiFall()
+	local obbyAntiFall = Obby.ObbyAntiFall
+	local obbySpawnPoint = Obby.ObbySpawnPoint
+
+	obbyAntiFall.Touched:Connect(function(hit)
+		local character = hit.Parent
+		local player = Players:GetPlayerFromCharacter(character)
+
+		if player then
+			character:PivotTo(obbySpawnPoint.CFrame)
+		end
+	end)
+
+	local water = workspace.Main.Water
+	water.Touched:Connect(function(hit)
+		local character = hit.Parent
+		local player = Players:GetPlayerFromCharacter(character)
+
+		if player then
+			character:PivotTo(workspace.Spawn.CFrame)
+		end
+	end)
+end
+
+function FreeGiftManager:OnInit()
+	NotificationManager = require(script.Parent.Parent.Managers.NotificationManager)
+end
+
+function FreeGiftManager:OnStart()
+	task.spawn(self._setupObbyAntiFall, self)
+	task.spawn(self._setupGift, self)
+end
+
+return FreeGiftManager
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="406">
           <Properties>
             <string name="Name">FriendManager</string>
             <string name="Source"><![CDATA[-- Services
@@ -36719,7 +37164,7 @@ return FriendManager
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="402">
+        <Item class="ModuleScript" referent="407">
           <Properties>
             <string name="Name">GroupRewardManager</string>
             <string name="Source"><![CDATA[-- Services
@@ -36835,7 +37280,7 @@ return GroupRewardManager
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="403">
+        <Item class="ModuleScript" referent="408">
           <Properties>
             <string name="Name">LeaderboardManager</string>
             <string name="Source"><![CDATA[-- Services
@@ -36854,8 +37299,8 @@ local TOTAL_LEADERBOARD_ENTRIES = 25
 
 --
 local LEADERBOARD_DATA = {
-	Currency = DataStoreService:GetOrderedDataStore("RICHEST_LEADERBOARD_V1"),
-	Wins = DataStoreService:GetOrderedDataStore("MOST_WINS_LEADERBOARD_V1"),
+	Currency = DataStoreService:GetOrderedDataStore("RICHEST_LEADERBOARD_V2"),
+	Wins = DataStoreService:GetOrderedDataStore("MOST_WINS_LEADERBOARD_V2"),
 }
 
 --
@@ -36952,7 +37397,7 @@ return LeaderboardManager
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="404">
+        <Item class="ModuleScript" referent="409">
           <Properties>
             <string name="Name">NotificationManager</string>
             <string name="Source"><![CDATA[-- Services
@@ -36972,7 +37417,7 @@ return NotificationManager
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="405">
+        <Item class="ModuleScript" referent="410">
           <Properties>
             <string name="Name">OverheadUIManager</string>
             <string name="Source"><![CDATA[-- Services
@@ -37057,7 +37502,7 @@ return OverheadUIManager
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="406">
+        <Item class="ModuleScript" referent="411">
           <Properties>
             <string name="Name">PlayerDataManager</string>
             <string name="Source"><![CDATA[-- Services
@@ -37080,8 +37525,8 @@ local ProfileStore = require(ServerPackages.ProfileStore)
 local DataSettings = require(script.DataSettings)
 
 --
-local USE_STUDIO_DATA = false
-local LIVE_DATA_VERSION = "PLAYER_DATA_A1"
+local USE_STUDIO_DATA = true
+local LIVE_DATA_VERSION = "PLAYER_DATA_A2"
 local STUDIO_DATA_VERSION = "PLAYER_DATA_STUDIO_A3"
 local DEFAULT_TIMEOUT = 25
 local DATA_POLL_INTERVAL = 0.1
@@ -37366,6 +37811,8 @@ function PlayerDataManager:ListenForChanges(player: Player, key: string, callbac
 	end)
 end
 
+-- Binds a callback to be called when a player leaves
+-- @param callback The callback to call when a player leaves
 function PlayerDataManager:BindForCleanup(callback: (player: Player) -> ())
 	table.insert(self._cleanupCallbacks, callback)
 end
@@ -37499,7 +37946,7 @@ end
 return PlayerDataManager
 ]]></string>
           </Properties>
-          <Item class="ModuleScript" referent="407">
+          <Item class="ModuleScript" referent="412">
             <Properties>
               <string name="Name">DataSettings</string>
               <string name="Source"><![CDATA[return {
@@ -37533,7 +37980,355 @@ return PlayerDataManager
             </Properties>
           </Item>
         </Item>
-        <Item class="ModuleScript" referent="408">
+        <Item class="ModuleScript" referent="413">
+          <Properties>
+            <string name="Name">PunchManager</string>
+            <string name="Source"><![CDATA[-- Services
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local StarterPlayers = game:GetService("StarterPlayer")
+
+-- Packages
+local Packages = ReplicatedStorage.Packages
+local BridgeNet2 = require(Packages.BridgeNet2)
+
+-- Assets
+local Assets = ReplicatedStorage.Assets
+
+-- Constants
+local TOOL_NAME = "Punch"
+local OWNER_ATTRIBUTE = "OwnerId"
+local REQUEST_COOLDOWN = 0.1
+local VALID_RANGE = 8
+local MIN_FORWARD_DOT = 0.2
+local KNOCKBACK_SPEED = 220
+local KNOCKBACK_UP_SPEED = 25
+local MAX_KNOCKBACK_SPEED = 90
+local EQUIPPED_WALKSPEED = 10
+local EQUIPPED_JUMPPOWER = 0
+
+--
+local RoundManager
+local SoundManager
+
+--
+local PunchManager = {
+	RequestPunchHit = BridgeNet2.ReferenceBridge("RequestPunchHit"),
+
+	_tools = {} :: { [Player]: Tool },
+	_lastPunchAt = {} :: { [Player]: number },
+	_characterConnections = {} :: { [Player]: RBXScriptConnection },
+	_toolConnections = {} :: { [Player]: any },
+}
+
+local function getRootPart(player: Player): BasePart?
+	local character = player.Character
+	local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+	return rootPart :: BasePart?
+end
+
+local function getHumanoid(player: Player): Humanoid?
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	return humanoid
+end
+
+local function getBackpack(player: Player): Backpack?
+	local backpack = player:FindFirstChildOfClass("Backpack")
+	return backpack
+end
+
+local function parseTargetUserId(payload: any): number?
+	if typeof(payload) == "number" then
+		return payload
+	end
+
+	if typeof(payload) == "table" then
+		return tonumber(payload.TargetUserId or payload.UserId or payload[1])
+	end
+
+	return nil
+end
+
+local function setPlayerMovement(player: Player, walkSpeed: number, jumpPower: number)
+	local humanoid = getHumanoid(player)
+	if not humanoid then
+		return
+	end
+
+	humanoid.WalkSpeed = walkSpeed
+	humanoid.JumpPower = jumpPower
+end
+
+local function resetPlayerMovement(player: Player)
+	setPlayerMovement(player, StarterPlayers.CharacterWalkSpeed, StarterPlayers.CharacterJumpPower)
+end
+
+function PunchManager:_disconnectToolConnections(player: Player)
+	local connections = self._toolConnections[player]
+	if not connections then
+		return
+	end
+
+	for _, connection in connections do
+		connection:Disconnect()
+	end
+
+	self._toolConnections[player] = nil
+end
+
+-- Removes any punch tool owned by the player from their backpack and character.
+function PunchManager:_removePlayerTool(player: Player)
+	self:_disconnectToolConnections(player)
+	resetPlayerMovement(player)
+
+	local trackedTool = self._tools[player]
+	if trackedTool then
+		trackedTool:Destroy()
+		self._tools[player] = nil
+	end
+
+	for _, container in { getBackpack(player), player.Character } do
+		if not container then
+			continue
+		end
+
+		for _, child in container:GetChildren() do
+			if
+				child:IsA("Tool")
+				and child.Name == TOOL_NAME
+				and child:GetAttribute(OWNER_ATTRIBUTE) == player.UserId
+			then
+				child:Destroy()
+			end
+		end
+	end
+end
+
+-- Gives and equips the final-round punch tool.
+function PunchManager:_givePlayerTool(player: Player)
+	self:_removePlayerTool(player)
+
+	local toolsFolder = Assets:FindFirstChild("Tools")
+	local toolTemplate = toolsFolder and toolsFolder:FindFirstChild(TOOL_NAME)
+	if not toolTemplate or not toolTemplate:IsA("Tool") then
+		warn("[PunchManager] ReplicatedStorage.Assets.Tools.Punch is missing")
+		return
+	end
+
+	local backpack = getBackpack(player) or player:WaitForChild("Backpack", 5)
+	if not backpack then
+		return
+	end
+
+	local punchTool = toolTemplate:Clone()
+	punchTool:SetAttribute(OWNER_ATTRIBUTE, player.UserId)
+	punchTool:AddTag(TOOL_NAME)
+	punchTool.Parent = backpack
+	self._tools[player] = punchTool
+	self._toolConnections[player] = {
+		punchTool.Equipped:Connect(function()
+			setPlayerMovement(player, EQUIPPED_WALKSPEED, EQUIPPED_JUMPPOWER)
+		end),
+		punchTool.Unequipped:Connect(function()
+			resetPlayerMovement(player)
+		end),
+	}
+
+	local humanoid = getHumanoid(player)
+	if humanoid then
+		humanoid:EquipTool(punchTool)
+	end
+end
+
+-- Starts punch tooling for the two active finalists.
+function PunchManager:_startFinalRound(players: { Player })
+	self:_cleanupFinalRound()
+
+	for _, player in players do
+		if player and player:IsDescendantOf(Players) then
+			self:_givePlayerTool(player)
+		end
+	end
+end
+
+-- Clears punch tools and request state for the active final round.
+function PunchManager:_cleanupFinalRound()
+	local playersWithTools = {}
+	for player in self._tools do
+		table.insert(playersWithTools, player)
+	end
+
+	for _, player in playersWithTools do
+		self:_removePlayerTool(player)
+	end
+
+	table.clear(self._lastPunchAt)
+end
+
+-- Checks the attacker still owns an equipped or backpacked punch tool.
+function PunchManager:_hasOwnedPunchTool(player: Player): boolean
+	local tool = self._tools[player]
+	if tool and tool:GetAttribute(OWNER_ATTRIBUTE) == player.UserId and tool:IsDescendantOf(game) then
+		return true
+	end
+
+	for _, container in { player.Character, getBackpack(player) } do
+		if not container then
+			continue
+		end
+
+		for _, child in container:GetChildren() do
+			if
+				child:IsA("Tool")
+				and child.Name == TOOL_NAME
+				and child:GetAttribute(OWNER_ATTRIBUTE) == player.UserId
+			then
+				self._tools[player] = child
+				return true
+			end
+		end
+	end
+
+	return false
+end
+
+-- Validates a client hit candidate using server character positions.
+function PunchManager:_canPunchHit(attacker: Player, target: Player): boolean
+	if attacker == target then
+		return false
+	end
+
+	if not RoundManager:IsLastRoundActive() then
+		return false
+	end
+
+	if not RoundManager:IsPlayerAlive(attacker) or not RoundManager:IsPlayerAlive(target) then
+		return false
+	end
+
+	if not self:_hasOwnedPunchTool(attacker) then
+		return false
+	end
+
+	local attackerRoot = getRootPart(attacker)
+	local targetRoot = getRootPart(target)
+	local targetHumanoid = getHumanoid(target)
+	if not attackerRoot or not targetRoot or not targetHumanoid or targetHumanoid.Health <= 0 then
+		return false
+	end
+
+	local offset = targetRoot.Position - attackerRoot.Position
+	local flatOffset = Vector3.new(offset.X, 0, offset.Z)
+	if flatOffset.Magnitude <= 0 or flatOffset.Magnitude > VALID_RANGE then
+		return false
+	end
+
+	local look = attackerRoot.CFrame.LookVector
+	local flatLook = Vector3.new(look.X, 0, look.Z)
+	if flatLook.Magnitude <= 0 then
+		return false
+	end
+
+	return flatLook.Unit:Dot(flatOffset.Unit) >= MIN_FORWARD_DOT
+end
+
+-- Pushes the target away from the attacker without ragdolling.
+function PunchManager:_pushTarget(attackerRoot: BasePart, targetRoot: BasePart)
+	local offset = targetRoot.Position - attackerRoot.Position
+	local direction = Vector3.new(offset.X, 0, offset.Z)
+	if direction.Magnitude <= 0 then
+		direction = Vector3.new(attackerRoot.CFrame.LookVector.X, 0, attackerRoot.CFrame.LookVector.Z)
+	end
+	if direction.Magnitude <= 0 then
+		return
+	end
+
+	local currentVelocity = targetRoot.AssemblyLinearVelocity
+	local horizontalVelocity = direction.Unit * KNOCKBACK_SPEED
+	if horizontalVelocity.Magnitude > MAX_KNOCKBACK_SPEED then
+		horizontalVelocity = horizontalVelocity.Unit * MAX_KNOCKBACK_SPEED
+	end
+
+	targetRoot.AssemblyLinearVelocity =
+		Vector3.new(horizontalVelocity.X, math.max(currentVelocity.Y, KNOCKBACK_UP_SPEED), horizontalVelocity.Z)
+end
+
+-- Handles client punch hit requests after server-side validation.
+function PunchManager:_handlePunchHit(attacker: Player, payload: any)
+	local targetUserId = parseTargetUserId(payload)
+	local target = targetUserId and Players:GetPlayerByUserId(targetUserId)
+	if not target then
+		return
+	end
+
+	local now = workspace:GetServerTimeNow()
+	if now - (self._lastPunchAt[attacker] or 0) < REQUEST_COOLDOWN then
+		return
+	end
+	self._lastPunchAt[attacker] = now
+
+	if not self:_canPunchHit(attacker, target) then
+		return
+	end
+
+	local attackerRoot = getRootPart(attacker)
+	local targetRoot = getRootPart(target)
+	if not attackerRoot or not targetRoot then
+		return
+	end
+
+	self:_pushTarget(attackerRoot, targetRoot)
+	SoundManager:PlayToPlayers("PunchHit", attackerRoot, { PlaybackSpeed = Random.new():NextNumber(0.8, 1.2) })
+end
+
+function PunchManager:OnInit()
+	RoundManager = require(script.Parent.RoundManager)
+	SoundManager = require(script.Parent.SoundManager)
+end
+
+function PunchManager:OnStart()
+	RoundManager.OnLastRoundStarted:Connect(function(players: { Player })
+		self:_startFinalRound(players)
+	end)
+
+	RoundManager.OnLastRoundEnded:Connect(function()
+		self:_cleanupFinalRound()
+	end)
+
+	self.RequestPunchHit:Connect(function(player: Player, payload: any)
+		self:_handlePunchHit(player, payload)
+	end)
+
+	Players.PlayerAdded:Connect(function(player: Player)
+		self._characterConnections[player] = player.CharacterRemoving:Connect(function()
+			self:_removePlayerTool(player)
+		end)
+	end)
+
+	Players.PlayerRemoving:Connect(function(player: Player)
+		self:_removePlayerTool(player)
+		self._lastPunchAt[player] = nil
+
+		local connection = self._characterConnections[player]
+		if connection then
+			connection:Disconnect()
+			self._characterConnections[player] = nil
+		end
+	end)
+
+	for _, player in Players:GetPlayers() do
+		self._characterConnections[player] = player.CharacterRemoving:Connect(function()
+			self:_removePlayerTool(player)
+		end)
+	end
+end
+
+return PunchManager
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="414">
           <Properties>
             <string name="Name">RagdollManager</string>
             <string name="Source"><![CDATA[-- Services
@@ -37623,7 +38418,7 @@ return RagdollManager
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="409">
+        <Item class="ModuleScript" referent="415">
           <Properties>
             <string name="Name">RoundManager</string>
             <string name="Source"><![CDATA[--[[
@@ -37696,6 +38491,7 @@ return RagdollManager
 -- Services
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 local SoundService = game:GetService("SoundService")
 local StarterPlayers = game:GetService("StarterPlayer")
 
@@ -37724,6 +38520,7 @@ local ShopManager
 local PlayerDataManager
 local NotificationManager
 local SoundManager
+local AFKManager
 
 --
 local FIRST_STAGE = "Intermission"
@@ -37740,6 +38537,8 @@ local RoundManager = {
 	OnBombPassed = Signal.new(), -- (fromPlayer, toPlayer, direction)
 	OnMusicCycleStarted = Signal.new(), -- (timestamp, duration)
 	OnMusicCycleStopped = Signal.new(),
+	OnLastRoundStarted = Signal.new(), -- (players: { Player })
+	OnLastRoundEnded = Signal.new(),
 
 	-- BridgeNet2 events
 	SyncExplosionTimeEvent = BridgeNet2.ReferenceBridge("SyncExplosionTime"),
@@ -37747,6 +38546,8 @@ local RoundManager = {
 	PlayerEliminatedEvent = BridgeNet2.ReferenceBridge("PlayerEliminated"),
 	PostEliminationEvent = BridgeNet2.ReferenceBridge("PostElimination"),
 	MatchEndEvent = BridgeNet2.ReferenceBridge("MatchEnd"),
+	LastRoundCountdownEvent = BridgeNet2.ReferenceBridge("LastRoundCountdown"),
+	LastRoundStartedEvent = BridgeNet2.ReferenceBridge("LastRoundStarted"),
 	EliminationChoicePromptEvent = BridgeNet2.ReferenceBridge("EliminationChoicePrompt"),
 	EliminationChoiceResolvedEvent = BridgeNet2.ReferenceBridge("EliminationChoiceResolved"),
 	EliminationChoiceRequestEvent = BridgeNet2.ReferenceBridge("EliminationChoiceRequest"),
@@ -37777,6 +38578,12 @@ RoundManager._suppressNextMusicStop = false
 RoundManager._pendingChoices =
 	{} :: { [Player]: { Resolved: boolean, Thread: thread?, PurchasePending: boolean?, ProductId: string? } }
 RoundManager._eliminationBoardTitle = nil :: TextLabel?
+RoundManager._lastRoundActive = false
+RoundManager._lastRoundResolved = false
+RoundManager._lastRoundScaleThread = nil :: thread?
+RoundManager._lastRoundHitPart = nil :: BasePart?
+RoundManager._lastRoundTouchConnection = nil :: RBXScriptConnection?
+RoundManager._arenaOriginalScale = 1
 
 ----------------------------------------------------------------
 -- Helpers
@@ -38162,7 +38969,7 @@ function RoundManager:_eliminate(player: Player, suppressChoicePrompt: boolean?)
 	end
 
 	-- Decide what happens to the eliminated player after the explosion / ragdoll.
-	if #self._alive >= GameConfigs.ELIMINATION_CHOICE_MIN_REMAINING then
+	if #self._alive > GameConfigs.ELIMINATION_CHOICE_MIN_REMAINING then
 		-- The match had more than 2 players before this elimination, so let the
 		-- eliminated player pick LEAVE / RESPAWN.
 		self:_promptEliminationChoice(player)
@@ -38620,19 +39427,25 @@ end
 ----------------------------------------------------------------
 
 function RoundManager:HasEnoughPlayers(): boolean
-	return #Players:GetPlayers() >= GameConfigs.MIN_PLAYERS_TO_START
+	return #self:GetEligiblePlayers() >= GameConfigs.MIN_PLAYERS_TO_START
 end
 
 function RoundManager:GetEligiblePlayers(): { Player }
 	local eligible = {}
 	for _, player in Players:GetPlayers() do
-		table.insert(eligible, player)
+		if not AFKManager:IsAFK(player) then
+			table.insert(eligible, player)
+		end
 	end
 	return eligible
 end
 
 function RoundManager:IsMatchActive(): boolean
 	return self._matchActive and self._currentStageName == "Match"
+end
+
+function RoundManager:IsLastRoundActive(): boolean
+	return self:IsMatchActive() and self._lastRoundActive and not self._lastRoundResolved
 end
 
 function RoundManager:IsPlayerAlive(player: Player): boolean
@@ -38845,6 +39658,171 @@ function RoundManager:_consumeReflect(target: Player, from: Player): boolean
 	return true
 end
 
+----------------------------------------------------------------
+-- Last round brawl
+----------------------------------------------------------------
+
+-- Ends the final brawl state and lets brawl-only systems clean up.
+function RoundManager:_endLastRound()
+	if not self._lastRoundActive and self._lastRoundResolved then
+		return
+	end
+
+	local wasActive = self._lastRoundActive
+	self._lastRoundActive = false
+	self._lastRoundResolved = true
+
+	if wasActive then
+		self.OnLastRoundEnded:Fire()
+	end
+end
+
+-- Shows or hides the final brawl hit part and its texture markers.
+function RoundManager:_setLastRoundHitPartVisible(isVisible: boolean)
+	local hitPart = self._lastRoundHitPart
+	if not hitPart then
+		return
+	end
+
+	hitPart.Transparency = if isVisible then 0 else 1
+	hitPart.CanTouch = isVisible
+
+	for _, descendant in hitPart:GetDescendants() do
+		if descendant:IsA("Texture") then
+			descendant.Transparency = if isVisible then 0 else 1
+		end
+	end
+end
+
+-- Restores last-round arena state so the next match starts from the full arena.
+function RoundManager:_resetLastRoundArena()
+	self:_endLastRound()
+
+	if self._lastRoundScaleThread then
+		task.cancel(self._lastRoundScaleThread)
+		self._lastRoundScaleThread = nil
+	end
+
+	local arena = workspace.Main:FindFirstChild("Arena")
+	if arena and arena:IsA("Model") then
+		arena:ScaleTo(self._arenaOriginalScale)
+	end
+
+	self:_setLastRoundHitPartVisible(false)
+	self._lastRoundResolved = false
+end
+
+-- Shrinks the arena model over the configured duration using Model:ScaleTo().
+function RoundManager:_startLastRoundArenaScale()
+	if self._lastRoundScaleThread then
+		task.cancel(self._lastRoundScaleThread)
+	end
+
+	local arena = workspace.Main:FindFirstChild("Arena")
+	if not arena or not arena:IsA("Model") then
+		warn("[RoundManager] Arena model workspace.Main.Arena not found; cannot scale last round arena")
+		return
+	end
+
+	local startScale = arena:GetScale()
+	local targetScale = GameConfigs.LAST_ROUND_ARENA_TARGET_SCALE
+	local duration = GameConfigs.LAST_ROUND_ARENA_SCALE_DURATION
+
+	self._lastRoundScaleThread = task.spawn(function()
+		local startedAt = os.clock()
+		while self._lastRoundActive do
+			local alpha = if duration > 0 then math.clamp((os.clock() - startedAt) / duration, 0, 1) else 1
+			arena:ScaleTo(startScale + (targetScale - startScale) * alpha)
+
+			if alpha >= 1 then
+				break
+			end
+
+			RunService.Heartbeat:Wait()
+		end
+
+		self._lastRoundScaleThread = nil
+	end)
+end
+
+-- Starts the final 1v1 brawl and yields until a winner can be resolved.
+function RoundManager:_startLastRoundBrawl()
+	if self._lastRoundActive or self._lastRoundResolved then
+		return
+	end
+
+	if not self._lastRoundHitPart then
+		warn("[RoundManager] Last round brawl skipped because LastRoundHitPart is missing")
+		return
+	end
+
+	self._lastRoundActive = true
+	self._lastRoundResolved = false
+	self._passesLocked = true
+	self._suppressNextMusicStop = true
+	self:_stopMusicCycle(true)
+
+	if BombManager then
+		BombManager:SetHolder(nil)
+	end
+
+	for secondsLeft = GameConfigs.LAST_ROUND_COUNTDOWN, 0, -1 do
+		self.LastRoundCountdownEvent:Fire(BridgeNet2.AllPlayers(), {
+			SecondsLeft = secondsLeft,
+		})
+
+		if secondsLeft > 0 then
+			task.wait(1)
+		end
+	end
+
+	if #self._alive ~= 2 then
+		self:_resetLastRoundArena()
+		return
+	end
+
+	local lastRoundPlayers = {
+		self._alive[1],
+		self._alive[2],
+	}
+
+	self.LastRoundStartedEvent:Fire(BridgeNet2.AllPlayers(), {
+		Players = {
+			serializePlayer(lastRoundPlayers[1]),
+			serializePlayer(lastRoundPlayers[2]),
+		},
+	})
+	self.OnLastRoundStarted:Fire(lastRoundPlayers)
+
+	for _, player in self._alive do
+		resetPlayerMovement(player)
+	end
+
+	self:_setLastRoundHitPartVisible(true)
+	self:_startLastRoundArenaScale()
+
+	while self._matchActive and self._lastRoundActive and not self._lastRoundResolved and #self._alive == 2 do
+		task.wait()
+	end
+end
+
+-- Eliminates the first finalist who touches the brawl hit part.
+function RoundManager:_handleLastRoundHit(hit: BasePart)
+	if not self._lastRoundActive or self._lastRoundResolved then
+		return
+	end
+
+	local character = hit:FindFirstAncestorOfClass("Model")
+	local player = character and Players:GetPlayerFromCharacter(character)
+	if not player or not indexOf(self._alive, player) then
+		return
+	end
+
+	self:_endLastRound()
+	self:_setLastRoundHitPartVisible(false)
+	self:_eliminate(player, true)
+end
+
 -- Stage hook: called from InitMatch
 function RoundManager:StartMatch(): boolean
 	self._alive = self:GetEligiblePlayers()
@@ -38858,6 +39836,7 @@ function RoundManager:StartMatch(): boolean
 	self._suppressNextMusicStop = false
 	self:_clearLockTarget(false)
 	self._eliminationBoardTitle.Text = ""
+	self:_resetLastRoundArena()
 
 	self:_setReplicaValue("Placements", {})
 
@@ -38881,7 +39860,7 @@ function RoundManager:StartMatch(): boolean
 		setPlayerMovement(player, GameConfigs.MATCH_WALKSPEED, GameConfigs.MATCH_JUMPPOWER)
 	end
 
-	if BombManager then
+	if BombManager and #self._alive > 2 then
 		self:_assignRandomBombHolder()
 	end
 
@@ -38906,6 +39885,17 @@ function RoundManager:RunMatchLoop()
 		return
 	end
 
+	if #self._alive == 2 then
+		self:_startLastRoundBrawl()
+		if #self._alive <= 1 then
+			self._matchActive = false
+			local suppressClientMusicStop = self._suppressNextMusicStop
+			self._suppressNextMusicStop = false
+			self:_stopMusicCycle(suppressClientMusicStop)
+			return
+		end
+	end
+
 	if not BombManager:GetHolder() then
 		self:_assignRandomBombHolder()
 	end
@@ -38928,6 +39918,26 @@ function RoundManager:RunMatchLoop()
 
 		if #self._alive <= 1 then
 			break
+		end
+
+		if #self._alive == 2 and not self._lastRoundActive and not self._lastRoundResolved then
+			self:_teleportPlayersToCircle()
+			self:_startLastRoundBrawl()
+			if #self._alive <= 1 then
+				break
+			end
+			if #self._alive > 2 and self._explosionTimestamp <= 0 then
+				if not BombManager:GetHolder() then
+					self:_assignRandomBombHolder()
+				end
+				self._passesLocked = false
+				self:_startMusicCycle(
+					RandomUtil.GetRandomFromMinMax(
+						GameConfigs.MUSIC_DURATION_RANGE.Min,
+						GameConfigs.MUSIC_DURATION_RANGE.Max
+					)
+				)
+			end
 		end
 
 		if self:_isMusicTimerExpired() then
@@ -38965,6 +39975,24 @@ function RoundManager:RunMatchLoop()
 
 			if #self._alive <= 1 then
 				break
+			end
+
+			if #self._alive == 2 then
+				if victimEliminated then
+					self.PostEliminationEvent:Fire(BridgeNet2.AllPlayers(), {
+						RemainingCount = #self._alive,
+					})
+
+					task.wait(GameConfigs.POST_ELIMINATION_GRACE)
+				end
+
+				self:_teleportPlayersToCircle()
+				self:_startLastRoundBrawl()
+				if #self._alive <= 1 then
+					break
+				end
+
+				continue
 			end
 
 			if victimEliminated then
@@ -39065,6 +40093,7 @@ function RoundManager:FinalizeMatch()
 	self._nukeActive = false
 	self._suppressNextMusicStop = false
 	self:_clearLockTarget(false)
+	self:_resetLastRoundArena()
 	self._eliminationBoardTitle.Text = ""
 	self:_publishAliveList()
 	if BombManager then
@@ -39114,6 +40143,12 @@ function RoundManager:_onPlayerLeaving(player: Player)
 	table.insert(self._placements, 1, player.UserId)
 	self:_publishAliveList()
 
+	NotificationManager.NotifyNormalEvent:Fire(BridgeNet2.AllPlayers(), {
+		`<font color="#ff0000">{player.Name}</font> left the game`,
+		3,
+		"Notify",
+	})
+
 	if wasHolder and BombManager then
 		-- Clear, then (if there are survivors) reassign immediately. No
 		-- elimination, no reward — they just left.
@@ -39124,11 +40159,29 @@ function RoundManager:_onPlayerLeaving(player: Player)
 		-- RunMatchLoop will detect this and exit naturally. The final timer
 		-- clear should not play the music-stopped warning for the winner.
 		self._suppressNextMusicStop = true
+		if self._lastRoundActive then
+			self:_endLastRound()
+			self:_setLastRoundHitPartVisible(false)
+		end
 		return
 	end
 
 	-- Re-arrange survivors into a fresh circle after the disconnect
 	self:_teleportPlayersToCircle()
+
+	if #self._alive == 2 then
+		self.PostEliminationEvent:Fire(BridgeNet2.AllPlayers(), {
+			RemainingCount = #self._alive,
+		})
+
+		self._passesLocked = true
+		self._suppressNextMusicStop = true
+		self:_stopMusicCycle(true)
+		if BombManager then
+			BombManager:SetHolder(nil)
+		end
+		return
+	end
 
 	if wasHolder then
 		self:_assignRandomBombHolder()
@@ -39239,6 +40292,22 @@ function RoundManager:OnInit()
 	self._eliminationBoardTitle.RichText = true
 	self._eliminationBoardTitle.Text = ""
 
+	local arena = workspace.Main:FindFirstChild("Arena")
+	if arena and arena:IsA("Model") then
+		self._arenaOriginalScale = arena:GetScale()
+	end
+
+	local lastRoundHitPart = workspace.Main:FindFirstChild("LastRoundHitPart")
+	if lastRoundHitPart and lastRoundHitPart:IsA("BasePart") then
+		self._lastRoundHitPart = lastRoundHitPart
+		self:_setLastRoundHitPartVisible(false)
+		self._lastRoundTouchConnection = lastRoundHitPart.Touched:Connect(function(hit: BasePart)
+			self:_handleLastRoundHit(hit)
+		end)
+	else
+		warn("[RoundManager] workspace.Main.LastRoundHitPart not found; final brawl touch elimination disabled")
+	end
+
 	self._roundReplica = Replica.New({
 		Token = ROUND_DATA_TOKEN,
 		Data = {
@@ -39269,6 +40338,7 @@ function RoundManager:OnInit()
 	NotificationManager = require(script.Parent.NotificationManager)
 	PlayerDataManager = require(script.Parent.PlayerDataManager)
 	SoundManager = require(script.Parent.SoundManager)
+	AFKManager = require(script.Parent.AFKManager)
 end
 
 function RoundManager:OnStart()
@@ -39324,7 +40394,7 @@ end
 return RoundManager
 ]]></string>
           </Properties>
-          <Item class="ModuleScript" referent="410">
+          <Item class="ModuleScript" referent="416">
             <Properties>
               <string name="Name">GameConfigs</string>
               <string name="Source"><![CDATA[--[[
@@ -39336,13 +40406,16 @@ return RoundManager
 
 local GameConfigs = {
 	-- Match requirements
-	MIN_PLAYERS_TO_START = 2,
+	MIN_PLAYERS_TO_START = 3,
 
 	-- Stage durations (seconds)
 	INTERMISSION_DURATION = 18, -- countdown once min players are present
 	INIT_MATCH_PRE_STAGE_DELAY = 3, -- delay inside InitMatch stage before advancing to Match
 	INIT_MATCH_COUNTDOWN = 3, -- "get ready" countdown after spawn, before music starts
 	MATCH_END_CELEBRATION_DURATION = 6, -- celebration time after a winner is picked
+	LAST_ROUND_COUNTDOWN = 3, -- 3-2-1 countdown before the final 1v1 brawl starts
+	LAST_ROUND_ARENA_TARGET_SCALE = 0.1, -- arena model scale at the end of the final 1v1 shrink
+	LAST_ROUND_ARENA_SCALE_DURATION = 1.5 * 60, -- seconds to shrink the arena during the final 1v1
 
 	-- Elimination grace periods
 	PRE_ELIMINATION_GRACE = 3, -- seconds between "timer expired" and the actual elimination call (for client effects)
@@ -39386,11 +40459,11 @@ return GameConfigs
 ]]></string>
             </Properties>
           </Item>
-          <Item class="Folder" referent="411">
+          <Item class="Folder" referent="417">
             <Properties>
               <string name="Name">Stages</string>
             </Properties>
-            <Item class="ModuleScript" referent="412">
+            <Item class="ModuleScript" referent="418">
               <Properties>
                 <string name="Name">InitMatch</string>
                 <string name="Source"><![CDATA[local GameConfigs = require(script.Parent.Parent.GameConfigs)
@@ -39429,12 +40502,13 @@ return Stage
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="413">
+            <Item class="ModuleScript" referent="419">
               <Properties>
                 <string name="Name">Intermission</string>
                 <string name="Source"><![CDATA[local Players = game:GetService("Players")
 
 local GameConfigs = require(script.Parent.Parent.GameConfigs)
+local AFKManager = require(script.Parent.Parent.Parent.AFKManager)
 
 local Stage = {}
 
@@ -39482,10 +40556,19 @@ function Stage:OnStart(roundManager)
 		refreshCountdown()
 	end)
 
-	self._playerRemovingConn = Players.PlayerRemoving:Connect(function()
-		if #Players:GetPlayers() - 1 < GameConfigs.MIN_PLAYERS_TO_START then
+	self._playerRemovingConn = Players.PlayerRemoving:Connect(function(player: Player)
+		local eligibleCount = #roundManager:GetEligiblePlayers()
+		if not AFKManager:IsAFK(player) then
+			eligibleCount -= 1
+		end
+
+		if eligibleCount < GameConfigs.MIN_PLAYERS_TO_START then
 			pauseCountdown()
 		end
+	end)
+
+	self._afkChangedConn = AFKManager.OnAFKChanged:Connect(function()
+		refreshCountdown()
 	end)
 end
 
@@ -39497,6 +40580,10 @@ function Stage:OnEnd(roundManager)
 	if self._playerRemovingConn then
 		self._playerRemovingConn:Disconnect()
 		self._playerRemovingConn = nil
+	end
+	if self._afkChangedConn then
+		self._afkChangedConn:Disconnect()
+		self._afkChangedConn = nil
 	end
 	self._endsAt = 0
 	roundManager:SetIntermissionEndsAt(0)
@@ -39521,7 +40608,7 @@ return Stage
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="414">
+            <Item class="ModuleScript" referent="420">
               <Properties>
                 <string name="Name">Match</string>
                 <string name="Source"><![CDATA[local Stage = {}
@@ -39563,7 +40650,7 @@ return Stage
 ]]></string>
               </Properties>
             </Item>
-            <Item class="ModuleScript" referent="415">
+            <Item class="ModuleScript" referent="421">
               <Properties>
                 <string name="Name">MatchEnd</string>
                 <string name="Source"><![CDATA[local Stage = {}
@@ -39604,7 +40691,7 @@ return Stage
             </Item>
           </Item>
         </Item>
-        <Item class="ModuleScript" referent="416">
+        <Item class="ModuleScript" referent="422">
           <Properties>
             <string name="Name">SelectPlayerManager</string>
             <string name="Source"><![CDATA[-- Services
@@ -39815,7 +40902,7 @@ return SelectPlayerManager
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="417">
+        <Item class="ModuleScript" referent="423">
           <Properties>
             <string name="Name">ShopManager</string>
             <string name="Source"><![CDATA[-- Services
@@ -40236,7 +41323,7 @@ return ShopManager
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="418">
+        <Item class="ModuleScript" referent="424">
           <Properties>
             <string name="Name">SoundManager</string>
             <string name="Source"><![CDATA[-- Services
@@ -40295,7 +41382,7 @@ return SoundManager
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="419">
+        <Item class="ModuleScript" referent="425">
           <Properties>
             <string name="Name">TimeRewardManager</string>
             <string name="Source"><![CDATA[-- Services
@@ -40504,11 +41591,11 @@ return TimeRewardManager
           </Properties>
         </Item>
       </Item>
-      <Item class="Folder" referent="420">
+      <Item class="Folder" referent="426">
         <Properties>
           <string name="Name">Modules</string>
         </Properties>
-        <Item class="ModuleScript" referent="421">
+        <Item class="ModuleScript" referent="427">
           <Properties>
             <string name="Name">BuildRagdoll</string>
             <string name="Source"><![CDATA[--[[
@@ -40588,7 +41675,7 @@ return function(humanoid)
 end
 ]]></string>
           </Properties>
-          <Item class="ModuleScript" referent="422">
+          <Item class="ModuleScript" referent="428">
             <Properties>
               <string name="Name">BuildCollisionFilters</string>
               <string name="Source"><![CDATA[--[[
@@ -40751,7 +41838,7 @@ end
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="423">
+          <Item class="ModuleScript" referent="429">
             <Properties>
               <string name="Name">BuildConstraints</string>
               <string name="Source"><![CDATA[--[[
@@ -40845,7 +41932,7 @@ end
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="424">
+          <Item class="ModuleScript" referent="430">
             <Properties>
               <string name="Name">GetLastWordFromPascalCase</string>
               <string name="Source"><![CDATA[--[[
@@ -40871,7 +41958,7 @@ end
             </Properties>
           </Item>
         </Item>
-        <Item class="ModuleScript" referent="425">
+        <Item class="ModuleScript" referent="431">
           <Properties>
             <string name="Name">LoadedComponents</string>
             <string name="Source"><![CDATA[return {}
@@ -40879,7 +41966,7 @@ end
           </Properties>
         </Item>
       </Item>
-      <Item class="Script" referent="426">
+      <Item class="Script" referent="432">
         <Properties>
           <string name="Name">Runtime</string>
           <token name="RunContext">0</token>
@@ -41006,32 +42093,32 @@ print(string.format("Server Fully Loaded: %.2f ms", totalLoadTime))
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Folder" referent="427">
+      <Item class="Folder" referent="433">
         <Properties>
           <string name="Name">Components</string>
         </Properties>
       </Item>
     </Item>
-    <Item class="Folder" referent="428">
+    <Item class="Folder" referent="434">
       <Properties>
         <string name="Name">ServerPackages</string>
       </Properties>
-      <Item class="ModuleScript" referent="429">
+      <Item class="ModuleScript" referent="435">
         <Properties>
           <string name="Name">ProfileStore</string>
           <string name="Source"><![CDATA[return require(script.Parent._Index["lm-loleris_profilestore@1.0.3"]["profilestore"])
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Folder" referent="430">
+      <Item class="Folder" referent="436">
         <Properties>
           <string name="Name">_Index</string>
         </Properties>
-        <Item class="Folder" referent="431">
+        <Item class="Folder" referent="437">
           <Properties>
             <string name="Name">lm-loleris_profilestore@1.0.3</string>
           </Properties>
-          <Item class="ModuleScript" referent="432">
+          <Item class="ModuleScript" referent="438">
             <Properties>
               <string name="Name">profilestore</string>
               <string name="Source">--[[
@@ -43283,23 +44370,23 @@ return ProfileStore</string>
       </Item>
     </Item>
   </Item>
-  <Item class="StarterPlayer" referent="433">
+  <Item class="StarterPlayer" referent="439">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="434">
+    <Item class="StarterPlayerScripts" referent="440">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="Folder" referent="435">
+      <Item class="Folder" referent="441">
         <Properties>
           <string name="Name">Client</string>
         </Properties>
-        <Item class="Folder" referent="436">
+        <Item class="Folder" referent="442">
           <Properties>
             <string name="Name">Components</string>
           </Properties>
-          <Item class="ModuleScript" referent="437">
+          <Item class="ModuleScript" referent="443">
             <Properties>
               <string name="Name">EventInviter</string>
               <string name="Source"><![CDATA[-- Services
@@ -43344,7 +44431,7 @@ return EventInviter
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="438">
+          <Item class="ModuleScript" referent="444">
             <Properties>
               <string name="Name">GradientPart</string>
               <string name="Source"><![CDATA[-- Services
@@ -43396,7 +44483,7 @@ return GradientPart
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="439">
+          <Item class="ModuleScript" referent="445">
             <Properties>
               <string name="Name">ImagePan</string>
               <string name="Source"><![CDATA[-- Services
@@ -43430,7 +44517,7 @@ return ImagePan
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="440">
+          <Item class="ModuleScript" referent="446">
             <Properties>
               <string name="Name">PartHover</string>
               <string name="Source"><![CDATA[-- Services
@@ -43480,7 +44567,7 @@ return PartHover
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="441">
+          <Item class="ModuleScript" referent="447">
             <Properties>
               <string name="Name">PartSpin</string>
               <string name="Source"><![CDATA[-- Services
@@ -43518,7 +44605,7 @@ return PartSpin
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="442">
+          <Item class="ModuleScript" referent="448">
             <Properties>
               <string name="Name">PromptSubjectHighlight</string>
               <string name="Source"><![CDATA[-- Services
@@ -43571,7 +44658,132 @@ return PromptSubjectHighlight
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="443">
+          <Item class="ModuleScript" referent="449">
+            <Properties>
+              <string name="Name">Punch</string>
+              <string name="Source"><![CDATA[-- Services
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+
+-- Packages
+local Packages = ReplicatedStorage.Packages
+local BridgeNet2 = require(Packages.BridgeNet2)
+local Component = require(Packages.Component)
+local Trove = require(Packages.Trove)
+
+-- Shared
+local Shared = ReplicatedStorage.Shared
+local Hitbox = require(Shared.Hitbox)
+
+-- Local Player
+local LocalPlayer = Players.LocalPlayer
+
+local PER_PUNCH_CD = 0.25
+local MAX_PUNCH_SET = 2
+local PER_SET_CD = 1
+local SET_ALLOWANCE = 1.5
+
+local HITBOX_OFFSET = CFrame.new(0, 0, -3)
+local HITBOX_SIZE = Vector3.new(5, 5, 5)
+
+-- Controllers
+local AnimationController = require(script.Parent.Parent.Controllers.AnimationController)
+local SoundController = require(script.Parent.Parent.Controllers.SoundController)
+
+--
+local Punch = Component.new({
+	Tag = script.Name,
+})
+
+local RequestPunchHit = BridgeNet2.ReferenceBridge("RequestPunchHit")
+
+function Punch:Construct()
+	self._cleaner = Trove.new()
+	self._lastPunch = nil
+	self._setCooldownEndsAt = 0
+	self._punchCount = 0
+
+	local ownerId = self.Instance:GetAttribute("OwnerId")
+
+	if ownerId and ownerId ~= LocalPlayer.UserId then
+		return
+	end
+
+	self._cleaner:Add(self.Instance.Equipped:Connect(function()
+		AnimationController:PlayAnimation("PunchIdle")
+	end))
+
+	self._cleaner:Add(self.Instance.Unequipped:Connect(function()
+		AnimationController:StopAnimation("PunchIdle")
+	end))
+
+	self._cleaner:Add(function()
+		AnimationController:StopAnimation("PunchIdle")
+	end)
+
+	self._cleaner:Add(self.Instance.Activated:Connect(function()
+		local now = os.clock()
+
+		if now < self._setCooldownEndsAt then
+			return
+		end
+
+		if self._lastPunch and now - self._lastPunch < PER_PUNCH_CD then
+			return
+		end
+
+		if self._lastPunch and now - self._lastPunch > SET_ALLOWANCE then
+			self._punchCount = 0
+		end
+
+		local character = LocalPlayer.Character
+		local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+		if not character or not rootPart then
+			return
+		end
+
+		self._lastPunch = now
+		self._punchCount += 1
+		AnimationController:PlayAnimation(`Punch{self._punchCount}`)
+		SoundController:PlaySound("Punch", rootPart, { PlaybackSpeed = Random.new():NextNumber(1, 1.2) }, nil, true)
+		self:_checkHit(character, rootPart)
+
+		if self._punchCount < MAX_PUNCH_SET then
+			return
+		end
+
+		self._setCooldownEndsAt = now + PER_SET_CD
+		self._punchCount = 0
+		self:OnSetCompleted()
+	end))
+end
+
+-- Checks a local forward hitbox and sends the first target candidate.
+function Punch:_checkHit(character: Model, rootPart: BasePart)
+	local hits = Hitbox.Hit(rootPart.CFrame * HITBOX_OFFSET, HITBOX_SIZE, { character })
+	for _, hitCharacter in hits do
+		local targetPlayer = Players:GetPlayerFromCharacter(hitCharacter)
+		if targetPlayer and targetPlayer ~= LocalPlayer then
+			RequestPunchHit:Fire({
+				TargetUserId = targetPlayer.UserId,
+			})
+			return
+		end
+	end
+end
+
+-- Hook for future server punch behavior.
+function Punch:OnSetCompleted() end
+
+function Punch:Stop()
+	self._cleaner:Destroy()
+end
+
+return Punch
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="450">
             <Properties>
               <string name="Name">RainbowColor</string>
               <string name="Source"><![CDATA[-- Services
@@ -43631,7 +44843,7 @@ return RainbowColor
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="444">
+          <Item class="ModuleScript" referent="451">
             <Properties>
               <string name="Name">RainbowStroke</string>
               <string name="Source"><![CDATA[-- Services
@@ -43679,7 +44891,7 @@ return RainbowStroke
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="445">
+          <Item class="ModuleScript" referent="452">
             <Properties>
               <string name="Name">UIHover</string>
               <string name="Source"><![CDATA[-- Services
@@ -43715,7 +44927,7 @@ return UIHover
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="446">
+          <Item class="ModuleScript" referent="453">
             <Properties>
               <string name="Name">UIPop</string>
               <string name="Source"><![CDATA[-- Services
@@ -43759,7 +44971,7 @@ return UIPop
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="447">
+          <Item class="ModuleScript" referent="454">
             <Properties>
               <string name="Name">UIPulse</string>
               <string name="Source"><![CDATA[-- Services
@@ -43803,7 +45015,7 @@ return UIPulse
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="448">
+          <Item class="ModuleScript" referent="455">
             <Properties>
               <string name="Name">UIRainbow</string>
               <string name="Source"><![CDATA[-- Services
@@ -43855,7 +45067,7 @@ return RainbowUI
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="449">
+          <Item class="ModuleScript" referent="456">
             <Properties>
               <string name="Name">UIRotate</string>
               <string name="Source"><![CDATA[-- Services
@@ -43884,7 +45096,7 @@ return UIRotate
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="450">
+          <Item class="ModuleScript" referent="457">
             <Properties>
               <string name="Name">UISway</string>
               <string name="Source"><![CDATA[-- Services
@@ -43929,7 +45141,7 @@ return UISway
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="451">
+          <Item class="ModuleScript" referent="458">
             <Properties>
               <string name="Name">VIP</string>
               <string name="Source"><![CDATA[-- Services
@@ -44067,11 +45279,65 @@ return VIPCrown
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="452">
+        <Item class="Folder" referent="459">
           <Properties>
             <string name="Name">Controllers</string>
           </Properties>
-          <Item class="ModuleScript" referent="453">
+          <Item class="ModuleScript" referent="460">
+            <Properties>
+              <string name="Name">AFKController</string>
+              <string name="Source"><![CDATA[-- Services
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+
+-- Packages
+local Packages = ReplicatedStorage.Packages
+local BridgeNet2 = require(Packages.BridgeNet2)
+
+-- Local Player
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer.PlayerGui
+
+--
+local HudController
+
+--
+local AFKController = {
+	ToggleAFKEvent = BridgeNet2.ReferenceBridge("ToggleAFK"),
+}
+
+function AFKController:_setupUI()
+	local buttonData = HudController:BindHudButton("AFK", function()
+		self.ToggleAFKEvent:Fire()
+	end)
+
+	local function setButtonState(isAFk: boolean)
+		buttonData.Button.NotAFKGradient.Enabled = not isAFk
+		buttonData.Button.AFKGradient.Enabled = isAFk
+		buttonData.Button.UIStroke.Color = not isAFk and Color3.fromRGB(80, 0, 0) or Color3.fromRGB(0, 80, 0)
+		buttonData.Button.Title.UIStroke.Color = not isAFk and Color3.fromRGB(80, 0, 0) or Color3.fromRGB(0, 80, 0)
+	end
+
+	setButtonState(LocalPlayer:GetAttribute("IsAFK"))
+	LocalPlayer:GetAttributeChangedSignal("IsAFK"):Connect(function()
+		local isAFk = LocalPlayer:GetAttribute("IsAFK")
+		setButtonState(isAFk)
+	end)
+end
+
+function AFKController:OnInit()
+	HudController = require(script.Parent.HudController)
+end
+
+function AFKController:OnStart()
+	task.spawn(AFKController._setupUI, self)
+end
+
+return AFKController
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="461">
             <Properties>
               <string name="Name">AbilitiesController</string>
               <string name="Source"><![CDATA[-- Services
@@ -44266,7 +45532,7 @@ return AbilitiesController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="454">
+          <Item class="ModuleScript" referent="462">
             <Properties>
               <string name="Name">AnimationController</string>
               <string name="Source"><![CDATA[-- Services
@@ -44335,7 +45601,7 @@ return AnimationController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="455">
+          <Item class="ModuleScript" referent="463">
             <Properties>
               <string name="Name">CameraController</string>
               <string name="Source"><![CDATA[-- Services
@@ -44505,7 +45771,7 @@ return CameraController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="456">
+          <Item class="ModuleScript" referent="464">
             <Properties>
               <string name="Name">CurrencyController</string>
               <string name="Source"><![CDATA[-- Services
@@ -44586,7 +45852,7 @@ return CurrencyController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="457">
+          <Item class="ModuleScript" referent="465">
             <Properties>
               <string name="Name">CustomizedChatController</string>
               <string name="Source"><![CDATA[-- Services
@@ -44669,7 +45935,7 @@ return ChatTagController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="458">
+          <Item class="ModuleScript" referent="466">
             <Properties>
               <string name="Name">EffectController</string>
               <string name="Source"><![CDATA[-- Services
@@ -44721,7 +45987,64 @@ return EffectController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="459">
+          <Item class="ModuleScript" referent="467">
+            <Properties>
+              <string name="Name">FreeGiftController</string>
+              <string name="Source"><![CDATA[-- Services
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+
+-- Packages
+local Packages = ReplicatedStorage.Packages
+
+-- Shared
+local Shared = ReplicatedStorage.Shared
+local GuiUtil = require(Shared.GuiUtil)
+
+-- Local Player
+local LocalPlayer = Players.LocalPlayer
+
+--
+local FreeGiftController = {}
+
+function FreeGiftController:_setupGift()
+	--
+	local ObbyFolder = workspace:WaitForChild("Obby")
+	local Hitbox = ObbyFolder:WaitForChild("Hitbox")
+
+	--
+	local ui = Hitbox.Attachment.UI
+	local timerText = ui.Holder.Timer
+
+	--
+	while true do
+		task.wait(1)
+
+		local currentTime = workspace:GetServerTimeNow()
+		local claimTime = LocalPlayer:GetAttribute("GiftClaimTime")
+
+		if not claimTime then
+			continue
+		end
+
+		if currentTime < claimTime then
+			local timeLeft = claimTime - currentTime
+			timerText.Text = GuiUtil.ConvertSecondsToHHMMSS(timeLeft)
+		else
+			timerText.Text = "CLAIM GIFT!"
+		end
+	end
+end
+
+function FreeGiftController:OnStart()
+	task.spawn(FreeGiftController._setupGift, self)
+end
+
+return FreeGiftController
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="468">
             <Properties>
               <string name="Name">FriendController</string>
               <string name="Source"><![CDATA[-- Services
@@ -44876,7 +46199,7 @@ return FriendController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="460">
+          <Item class="ModuleScript" referent="469">
             <Properties>
               <string name="Name">GroupRewardController</string>
               <string name="Source"><![CDATA[-- Services
@@ -44893,6 +46216,7 @@ local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer.PlayerGui
 
 --
+local PlayerDataController
 local UIController
 
 --
@@ -44920,9 +46244,27 @@ function GroupRewardController:_setupUI()
 	UIController:BindButtonClick(holder.Exit, function()
 		UIController:CloseFrame(holder)
 	end, true)
+
+	local function setButtonState(isClaimed: boolean)
+		holder.Claim.UIStroke.Color = isClaimed and Color3.fromRGB(50, 50, 50) or Color3.fromRGB(0, 85, 0)
+		holder.Claim.Title.UIStroke.Color = isClaimed and Color3.fromRGB(50, 50, 50) or Color3.fromRGB(0, 85, 0)
+		holder.Claim.Title.Text = isClaimed and "CLAIMED" or "CLAIM"
+		holder.Claim.CantClaimGradient.Enabled = isClaimed
+		holder.Claim.CanClaimGradient.Enabled = not isClaimed
+	end
+
+	PlayerDataController:GetReplica():andThen(function(replica)
+		local hasClaimedReward = replica.Data.ClaimedGroupReward
+		setButtonState(hasClaimedReward)
+
+		replica:OnSet({ "ClaimedGroupReward" }, function(newClaimedReward)
+			setButtonState(newClaimedReward)
+		end)
+	end)
 end
 
 function GroupRewardController:OnInit()
+	PlayerDataController = require(script.Parent.PlayerDataController)
 	UIController = require(script.Parent.UIController)
 	self.UI = PlayerGui:WaitForChild("LikeGameUI")
 end
@@ -44935,7 +46277,7 @@ return GroupRewardController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="461">
+          <Item class="ModuleScript" referent="470">
             <Properties>
               <string name="Name">HudController</string>
               <string name="Source"><![CDATA[-- Services
@@ -45003,7 +46345,7 @@ return HudController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="462">
+          <Item class="ModuleScript" referent="471">
             <Properties>
               <string name="Name">IntroController</string>
               <string name="Source"><![CDATA[-- Services
@@ -45041,7 +46383,7 @@ function IntroController:RunIntro()
 		GroupTransparency = 1,
 	}):Play()
 
-	TweenService:Create(humanoid, TweenInfo.new(3, Enum.EasingStyle.Sine), {
+	TweenService:Create(humanoid, TweenInfo.new(2, Enum.EasingStyle.Sine), {
 		CameraOffset = Vector3.new(0, 0, 0),
 	}):Play()
 
@@ -45059,7 +46401,7 @@ return IntroController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="463">
+          <Item class="ModuleScript" referent="472">
             <Properties>
               <string name="Name">LeaderboardController</string>
               <string name="Source"><![CDATA[-- Services
@@ -45243,7 +46585,7 @@ return LeaderboardController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="464">
+          <Item class="ModuleScript" referent="473">
             <Properties>
               <string name="Name">NotificationController</string>
               <string name="Source"><![CDATA[-- Services
@@ -45371,7 +46713,7 @@ return NotificationController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="465">
+          <Item class="ModuleScript" referent="474">
             <Properties>
               <string name="Name">PlayerDataController</string>
               <string name="Source"><![CDATA[-- Services
@@ -45445,7 +46787,7 @@ return PlayerDataController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="466">
+          <Item class="ModuleScript" referent="475">
             <Properties>
               <string name="Name">RagdollController</string>
               <string name="Source"><![CDATA[-- Services
@@ -45549,7 +46891,7 @@ return RagdollController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="467">
+          <Item class="ModuleScript" referent="476">
             <Properties>
               <string name="Name">RoundController</string>
               <string name="Source"><![CDATA[--[[
@@ -45570,6 +46912,8 @@ return RagdollController
 	  :OnPreElimination(victimInfo)                 - server grace starts; victim about to be eliminated (play effects now)
 	  :OnPlayerEliminated(eliminatedInfo, remaining) - player was just eliminated
 	  :OnPostElimination(remainingCount)            - server grace starts; circle is about to reset (play effects now)
+	  :OnLastRoundCountdown(secondsLeft)            - final 1v1 brawl countdown; receives 3, 2, 1, then 0
+	  :OnLastRoundStarted(players)                  - final 1v1 brawl started; players are the two finalists
 	  :OnEliminationChoicePrompt(expirationTime)    - LOCAL ONLY; you were eliminated and the match still has > 2 alive — show LEAVE/RESPAWN UI
 	  :OnEliminationChoiceResolved(choice)          - LOCAL ONLY; the prompt was answered, timed out, or was cancelled — hide the UI
 	                                                  (`choice` is "Respawn" or "Leave"; call :RequestRespawn() / :RequestLeave() to answer)
@@ -45647,6 +46991,8 @@ local RoundController = {
 	OnMusicStartSignal = Signal.new(), -- (explosionTimestamp: number)
 	OnMusicStopSignal = Signal.new(),
 	OnMatchEndSignal = Signal.new(), -- (winner: { UserId, Name, DisplayName }?, placements: { [number]: any })
+	OnLastRoundCountdownSignal = Signal.new(), -- (secondsLeft: number) final 1v1 brawl countdown
+	OnLastRoundStartedSignal = Signal.new(), -- (players: { [number]: { [string]: any } }) final 1v1 brawl started
 	OnEliminationChoicePromptSignal = Signal.new(), -- (expirationTime: number)
 	OnEliminationChoiceResolvedSignal = Signal.new(), -- (choice: string) "Respawn" | "Leave"
 
@@ -45658,6 +47004,8 @@ local RoundController = {
 	PlayerEliminatedBridge = BridgeNet2.ReferenceBridge("PlayerEliminated"),
 	PostEliminationBridge = BridgeNet2.ReferenceBridge("PostElimination"),
 	MatchEndBridge = BridgeNet2.ReferenceBridge("MatchEnd"),
+	LastRoundCountdownBridge = BridgeNet2.ReferenceBridge("LastRoundCountdown"),
+	LastRoundStartedBridge = BridgeNet2.ReferenceBridge("LastRoundStarted"),
 	EliminationChoicePromptBridge = BridgeNet2.ReferenceBridge("EliminationChoicePrompt"),
 	EliminationChoiceResolvedBridge = BridgeNet2.ReferenceBridge("EliminationChoiceResolved"),
 	EliminationChoiceRequestBridge = BridgeNet2.ReferenceBridge("EliminationChoiceRequest"),
@@ -45665,6 +47013,7 @@ local RoundController = {
 	_roundReplica = nil,
 	_lastStage = nil,
 	_lastBombHolderUserId = nil,
+	_lastRoundFightMusicStarted = false,
 	_explosionTimestamp = 0,
 	_countdownEndsAt = 0,
 	--
@@ -45835,6 +47184,7 @@ function RoundController:OnIntermissionWaiting()
 	local winnerFrame = ui.Winner
 
 	--
+	self._countdownEndsAt = 0
 	Spr.target(intermission, 0.7, 2.5, { Position = UDim2.fromScale(0.5, 0.325) })
 	Spr.target(winnerFrame, 0.7, 2.5, { Position = UDim2.fromScale(0.5, -0.5) })
 	intermission.Countdown.Visible = false
@@ -45900,6 +47250,7 @@ function RoundController:OnEnterMatchAll()
 		Spr.target(inGame, 0.7, 2.5, { Position = UDim2.fromScale(0.5, 0.05) })
 	end)
 
+	self._lastRoundFightMusicStarted = false
 	SoundController:StartGameMusic(self:GetKey("MusicToPlay"))
 	SoundController:SwitchBGM("Game", 3.5)
 end
@@ -45950,7 +47301,9 @@ function RoundController:OnMatchStart()
 	bomb.Parent = workspace.Main
 	self._bomb = bomb
 
-	local player = Players:GetPlayerByUserId(self:GetBombHolderUserId())
+	local bombHolder = self:GetBombHolderUserId()
+	local player = bombHolder and Players:GetPlayerByUserId(bombHolder)
+
 	if player then
 		self:OnBombPassed(player, true, nil)
 	end
@@ -45977,53 +47330,62 @@ function RoundController:OnPreElimination(victimInfo: { [string]: any }?)
 		return
 	end
 
-	task.wait(1.5)
+	self._gameCleaner:Add(task.delay(1.5, function()
+		if not player.Parent then
+			return
+		end
 
-	local character = player.Character
-	if not character or not character.Parent then
-		return
-	end
+		local character = player.Character
+		if not character or not character.Parent then
+			return
+		end
 
-	local camera = workspace.CurrentCamera
+		local camera = workspace.CurrentCamera
 
-	SoundController:PlaySound("OnEliminated")
+		SoundController:PlaySound("OnEliminated")
 
-	if self:IsInMatch() then
-		camera.CameraType = Enum.CameraType.Scriptable
-		camera.CFrame = character:GetPivot()
-			* CFrame.new(0, 5, -15)
-			* CFrame.Angles(0, math.rad(180), 0)
-			* CFrame.Angles(math.rad(-15), 0, 0)
+		if self:IsInMatch() then
+			camera.CameraType = Enum.CameraType.Scriptable
+			camera.CFrame = character:GetPivot()
+				* CFrame.new(0, 5, -15)
+				* CFrame.Angles(0, math.rad(180), 0)
+				* CFrame.Angles(math.rad(-15), 0, 0)
 
-		local tween = TweenService:Create(camera, TweenInfo.new(5), { CFrame = camera.CFrame * CFrame.new(0, 0, -5) })
-		tween:Play()
+			local tween =
+				TweenService:Create(camera, TweenInfo.new(5), { CFrame = camera.CFrame * CFrame.new(0, 0, -5) })
+			tween:Play()
 
-		self._gameCleaner:Add(function()
-			if tween then
-				tween:Cancel()
+			local function resetCamera()
+				if tween then
+					tween:Cancel()
+					tween = nil
+				end
+				camera.CameraType = Enum.CameraType.Custom
 			end
+
+			self._gameCleaner:Add(player.Destroying:Once(resetCamera))
+			self._gameCleaner:Add(resetCamera)
+		end
+
+		task.delay(1, function()
+			local eliminatedNotificationText = notification.EliminatedNotification:Clone()
+			eliminatedNotificationText.Title.UIScale.Scale = 0
+			eliminatedNotificationText.Title.Text = `{name:upper()} HAS BEEN ELIMINATED!`
+			eliminatedNotificationText.Visible = true
+			eliminatedNotificationText.Parent = notification
+
+			eliminatedNotificationText.Title:SetAttribute("Amplitude", 1)
+			eliminatedNotificationText.Title:AddTag("UISway")
+
+			Spr.target(eliminatedNotificationText.Title.UIScale, 0.7, 2.5, { Scale = 1 })
+
+			task.delay(3, function()
+				Spr.target(eliminatedNotificationText.Title.UIScale, 0.7, 2.5, { Scale = 0 })
+				task.wait(3)
+				eliminatedNotificationText:Destroy()
+			end)
 		end)
-	end
-
-	--
-	task.delay(1, function()
-		local eliminatedNotificationText = notification.EliminatedNotification:Clone()
-		eliminatedNotificationText.Title.UIScale.Scale = 0
-		eliminatedNotificationText.Title.Text = `{name:upper()} HAS BEEN ELIMINATED!`
-		eliminatedNotificationText.Visible = true
-		eliminatedNotificationText.Parent = notification
-
-		eliminatedNotificationText.Title:SetAttribute("Amplitude", 1)
-		eliminatedNotificationText.Title:AddTag("UISway")
-
-		Spr.target(eliminatedNotificationText.Title.UIScale, 0.7, 2.5, { Scale = 1 })
-
-		task.delay(3, function()
-			Spr.target(eliminatedNotificationText.Title.UIScale, 0.7, 2.5, { Scale = 0 })
-			task.wait(3)
-			eliminatedNotificationText:Destroy()
-		end)
-	end)
+	end))
 end
 
 -- Called right after an elimination and before survivors are re-circled
@@ -46048,6 +47410,7 @@ function RoundController:OnPostElimination(remainingCount: number)
 
 		Spr.target(readyText.UIScale, 0.45, 2, { Scale = 1 })
 		readyText.Visible = true
+		SoundController:PlaySound("StartRound")
 
 		self._gameCleaner:Add(task.delay(2.8, function()
 			Spr.target(readyText.UIScale, 0.5, 2, { Scale = 0 })
@@ -46060,6 +47423,44 @@ function RoundController:OnPostElimination(remainingCount: number)
 	end))
 
 	workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
+end
+
+-- Called during the final 1v1 brawl countdown.
+-- `secondsLeft` receives 3, 2, 1, then 0 when the brawl starts.
+function RoundController:OnLastRoundCountdown(secondsLeft: number)
+	if secondsLeft <= 0 or self._lastRoundFightMusicStarted then
+		return
+	end
+
+	self._lastRoundFightMusicStarted = true
+	SoundController:StartRandomFightMusic()
+	SoundController:SwitchBGM("Fight", 2.5)
+end
+
+-- Called when the final 1v1 brawl starts after the countdown finishes.
+function RoundController:OnLastRoundStarted(players: { [number]: { [string]: any } })
+	--
+	local ui = self.GameUI.Top
+	local inGame = ui.InGame
+	local finalRound = ui.FinalRound
+
+	if self:IsInMatch() then
+		Controls:Enable()
+	end
+
+	if not self._lastRoundFightMusicStarted then
+		SoundController:StartRandomFightMusic()
+		SoundController:SwitchBGM("Fight", 1)
+	end
+
+	--
+	finalRound.Title.Text =
+		`<font color="#00aaff">{players[1].Name:upper()}</font> vs <font color="#ff443e">{players[2].Name:upper()}</font>`
+
+	--
+	Spr.target(inGame, 0.7, 2.5, { Position = UDim2.fromScale(0.5, -0.5) })
+	Spr.target(finalRound, 0.7, 2.5, { Position = UDim2.fromScale(0.5, 0.05) })
+	self:ToggleGameControls(false)
 end
 
 -- Called whenever ANY player gets eliminated (including yourself).
@@ -46306,6 +47707,7 @@ function RoundController:OnMatchEnd(winner: { [string]: any }?, _placements: { [
 	local ui = self.GameUI
 	local top = ui.Top
 	local inGame = top.InGame
+	local finalRound = top.FinalRound
 	local middle = ui.Middle
 	local winnerFrame = top.Winner
 
@@ -46314,6 +47716,7 @@ function RoundController:OnMatchEnd(winner: { [string]: any }?, _placements: { [
 	-- Reset game ui back to normal
 	workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
 	Spr.target(inGame, 0.7, 2.5, { Position = UDim2.fromScale(0.5, -0.5) })
+	Spr.target(finalRound, 0.7, 2.5, { Position = UDim2.fromScale(0.5, -0.5) })
 	inGame.Title.UIScale.Scale = 1
 	middle.MusicStopped.UIScale.Scale = 0
 
@@ -46329,11 +47732,13 @@ function RoundController:OnMatchEnd(winner: { [string]: any }?, _placements: { [
 	Spr.target(winnerFrame, 0.7, 2.5, { Position = UDim2.fromScale(0.5, 0.1) })
 
 	SoundController:SwitchBGM("Background", 1.5)
+	AnimationController:StopAnimation("HoldBomb")
 
 	-- Reset per-match state so it doesn't bleed into the next match.
 	-- _lastStage is intentionally left alone — it drives stage-change detection
 	-- and the upcoming Intermission transition still needs the previous value.
 	self._lastBombHolderUserId = nil
+	self._lastRoundFightMusicStarted = false
 	self._explosionTimestamp = 0
 	self._countdownEndsAt = 0
 	self._bomb = nil
@@ -46451,6 +47856,10 @@ function RoundController:_handleBombHolderChange(newHolderUserId: number?)
 	if not newHolderUserId then
 		self._lastBombHolderUserId = nil
 		self:TogglePassButtons(false)
+		AnimationController:StopAnimation("HoldBomb")
+		if self._bomb and self._bomb.Parent then
+			self._bomb.Parent = nil
+		end
 		return
 	end
 
@@ -46596,6 +48005,26 @@ function RoundController:OnStart()
 		self:OnPostElimination(payload.RemainingCount or 0)
 	end)
 
+	-- Final 1v1 brawl countdown
+	self.LastRoundCountdownBridge:Connect(function(payload: any)
+		if typeof(payload) ~= "table" then
+			return
+		end
+		local secondsLeft = tonumber(payload.SecondsLeft) or 0
+		self.OnLastRoundCountdownSignal:Fire(secondsLeft)
+		self:OnLastRoundCountdown(secondsLeft)
+	end)
+
+	-- Final 1v1 brawl started
+	self.LastRoundStartedBridge:Connect(function(payload: any)
+		if typeof(payload) ~= "table" then
+			return
+		end
+		local players = payload.Players or {}
+		self.OnLastRoundStartedSignal:Fire(players)
+		self:OnLastRoundStarted(players)
+	end)
+
 	-- Elimination choice prompt (server -> this player only)
 	self.EliminationChoicePromptBridge:Connect(function(payload: any)
 		if typeof(payload) ~= "table" then
@@ -46634,7 +48063,7 @@ return RoundController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="468">
+          <Item class="ModuleScript" referent="477">
             <Properties>
               <string name="Name">SelectPlayerController</string>
               <string name="Source"><![CDATA[-- Services
@@ -46911,7 +48340,7 @@ return SelectPlayerController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="469">
+          <Item class="ModuleScript" referent="478">
             <Properties>
               <string name="Name">ShopController</string>
               <string name="Source"><![CDATA[-- Services
@@ -47201,7 +48630,7 @@ return ShopController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="470">
+          <Item class="ModuleScript" referent="479">
             <Properties>
               <string name="Name">SoundController</string>
               <string name="Source"><![CDATA[-- Services
@@ -47225,6 +48654,7 @@ local SoundController = {
 
 	_lastPlayedSounds = {},
 	_currentGameMusic = nil,
+	_currentBGMType = nil,
 	_muted = false,
 }
 
@@ -47431,15 +48861,23 @@ function SoundController:ToggleGameMusic(enabled: boolean, fadeDuration: number?
 	}):Play()
 end
 
-function SoundController:SwitchBGM(bgmType: "Game" | "Background", switchDuration: number?)
+function SoundController:SwitchBGM(bgmType: "Game" | "Background" | "Fight", switchDuration: number?)
 	local backgroundMusic = SoundService:FindFirstChild("BackgroundMusic", true)
 	local gameMusic = SoundService:FindFirstChild("GameMusic", true)
+	local fightSound = SoundService:FindFirstChild("FightSound", true)
+
+	if self._currentBGMType and self._currentBGMType == bgmType then
+		return
+	end
 
 	TweenService:Create(backgroundMusic, TweenInfo.new(switchDuration or 1, Enum.EasingStyle.Linear), {
 		Volume = bgmType == "Background" and 1 or 0,
 	}):Play()
 	TweenService:Create(gameMusic, TweenInfo.new(switchDuration or 1, Enum.EasingStyle.Linear), {
 		Volume = bgmType == "Game" and 1 or 0,
+	}):Play()
+	TweenService:Create(fightSound, TweenInfo.new(switchDuration or 1, Enum.EasingStyle.Linear), {
+		Volume = bgmType == "Fight" and 1 or 0,
 	}):Play()
 end
 
@@ -47452,6 +48890,29 @@ function SoundController:StartGameMusic(name: string)
 	local gameMusic = SoundService:FindFirstChild(name, true)
 	gameMusic:Play()
 	self._currentGameMusic = gameMusic
+end
+
+-- Starts a random fight music track for the final 1v1
+function SoundController:StartRandomFightMusic()
+	local fightSound = SoundService:FindFirstChild("FightSound", true)
+	if not fightSound then
+		warn("FightSound Sound Group not found in SoundService")
+		return
+	end
+
+	local sounds = fightSound:GetChildren()
+	if #sounds == 0 then
+		warn("FightSound Sound Group is empty")
+		return
+	end
+
+	if self._currentGameMusic then
+		self._currentGameMusic:Stop()
+	end
+
+	local randomFightMusic: Sound = sounds[math.random(1, #sounds)]
+	randomFightMusic:Play()
+	self._currentGameMusic = randomFightMusic
 end
 
 function SoundController:OnInit()
@@ -47467,11 +48928,11 @@ function SoundController:OnStart()
 	muteButton:setImage("rbxassetid://70577541005282", "Selected")
 
 	muteButton.selected:Connect(function()
-		self:MuteBGM(true)
+		self:SetBGMCoreVolume(0, 0.5)
 	end)
 
 	muteButton.deselected:Connect(function()
-		self:MuteBGM(false)
+		self:SetBGMCoreVolume(1, 0.5)
 	end)
 
 	-- Setup event handlers
@@ -47488,7 +48949,7 @@ return SoundController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="471">
+          <Item class="ModuleScript" referent="480">
             <Properties>
               <string name="Name">TimeRewardController</string>
               <string name="Source"><![CDATA[-- Services
@@ -47629,7 +49090,7 @@ return TimeRewardController
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="472">
+          <Item class="ModuleScript" referent="481">
             <Properties>
               <string name="Name">UIController</string>
               <string name="Source"><![CDATA[-- Services
@@ -47882,11 +49343,11 @@ return UIController
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="473">
+        <Item class="Folder" referent="482">
           <Properties>
             <string name="Name">Effects</string>
           </Properties>
-          <Item class="ModuleScript" referent="474">
+          <Item class="ModuleScript" referent="483">
             <Properties>
               <string name="Name">CoinReceived</string>
               <string name="Source"><![CDATA[-- Services
@@ -47927,7 +49388,7 @@ end
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="475">
+          <Item class="ModuleScript" referent="484">
             <Properties>
               <string name="Name">Confetti</string>
               <string name="Source"><![CDATA[-- Services
@@ -48092,7 +49553,7 @@ end
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="476">
+          <Item class="ModuleScript" referent="485">
             <Properties>
               <string name="Name">Nuke</string>
               <string name="Source"><![CDATA[-- Services
@@ -48160,11 +49621,11 @@ end
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="477">
+        <Item class="Folder" referent="486">
           <Properties>
             <string name="Name">Modules</string>
           </Properties>
-          <Item class="ModuleScript" referent="478">
+          <Item class="ModuleScript" referent="487">
             <Properties>
               <string name="Name">AnimatedNumber</string>
               <string name="Source"><![CDATA[-- Services
@@ -48242,7 +49703,7 @@ return AnimatedNumber
 ]]></string>
             </Properties>
           </Item>
-          <Item class="ModuleScript" referent="479">
+          <Item class="ModuleScript" referent="488">
             <Properties>
               <string name="Name">LoadedComponents</string>
               <string name="Source"><![CDATA[return {}
@@ -48250,7 +49711,7 @@ return AnimatedNumber
             </Properties>
           </Item>
         </Item>
-        <Item class="LocalScript" referent="480">
+        <Item class="LocalScript" referent="489">
           <Properties>
             <string name="Name">Runtime</string>
             <string name="Source"><![CDATA[-- Services
@@ -48392,11 +49853,11 @@ print(string.format("Client Fully Loaded: %.2f ms", totalLoadTime))
           </Properties>
         </Item>
       </Item>
-      <Item class="Folder" referent="481">
+      <Item class="Folder" referent="490">
         <Properties>
           <string name="Name">Components</string>
         </Properties>
-        <Item class="ModuleScript" referent="482">
+        <Item class="ModuleScript" referent="491">
           <Properties>
             <string name="Name">EventInviter</string>
             <string name="Source"><![CDATA[-- Services
@@ -48441,7 +49902,7 @@ return EventInviter
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="483">
+        <Item class="ModuleScript" referent="492">
           <Properties>
             <string name="Name">GradientPart</string>
             <string name="Source"><![CDATA[-- Services
@@ -48493,7 +49954,7 @@ return GradientPart
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="484">
+        <Item class="ModuleScript" referent="493">
           <Properties>
             <string name="Name">ImagePan</string>
             <string name="Source"><![CDATA[-- Services
@@ -48527,7 +49988,7 @@ return ImagePan
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="485">
+        <Item class="ModuleScript" referent="494">
           <Properties>
             <string name="Name">PartHover</string>
             <string name="Source"><![CDATA[-- Services
@@ -48577,7 +50038,7 @@ return PartHover
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="486">
+        <Item class="ModuleScript" referent="495">
           <Properties>
             <string name="Name">PartSpin</string>
             <string name="Source"><![CDATA[-- Services
@@ -48615,7 +50076,7 @@ return PartSpin
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="487">
+        <Item class="ModuleScript" referent="496">
           <Properties>
             <string name="Name">PromptSubjectHighlight</string>
             <string name="Source"><![CDATA[-- Services
@@ -48668,7 +50129,132 @@ return PromptSubjectHighlight
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="488">
+        <Item class="ModuleScript" referent="497">
+          <Properties>
+            <string name="Name">Punch</string>
+            <string name="Source"><![CDATA[-- Services
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+
+-- Packages
+local Packages = ReplicatedStorage.Packages
+local BridgeNet2 = require(Packages.BridgeNet2)
+local Component = require(Packages.Component)
+local Trove = require(Packages.Trove)
+
+-- Shared
+local Shared = ReplicatedStorage.Shared
+local Hitbox = require(Shared.Hitbox)
+
+-- Local Player
+local LocalPlayer = Players.LocalPlayer
+
+local PER_PUNCH_CD = 0.25
+local MAX_PUNCH_SET = 2
+local PER_SET_CD = 1
+local SET_ALLOWANCE = 1.5
+
+local HITBOX_OFFSET = CFrame.new(0, 0, -3)
+local HITBOX_SIZE = Vector3.new(5, 5, 5)
+
+-- Controllers
+local AnimationController = require(script.Parent.Parent.Controllers.AnimationController)
+local SoundController = require(script.Parent.Parent.Controllers.SoundController)
+
+--
+local Punch = Component.new({
+	Tag = script.Name,
+})
+
+local RequestPunchHit = BridgeNet2.ReferenceBridge("RequestPunchHit")
+
+function Punch:Construct()
+	self._cleaner = Trove.new()
+	self._lastPunch = nil
+	self._setCooldownEndsAt = 0
+	self._punchCount = 0
+
+	local ownerId = self.Instance:GetAttribute("OwnerId")
+
+	if ownerId and ownerId ~= LocalPlayer.UserId then
+		return
+	end
+
+	self._cleaner:Add(self.Instance.Equipped:Connect(function()
+		AnimationController:PlayAnimation("PunchIdle")
+	end))
+
+	self._cleaner:Add(self.Instance.Unequipped:Connect(function()
+		AnimationController:StopAnimation("PunchIdle")
+	end))
+
+	self._cleaner:Add(function()
+		AnimationController:StopAnimation("PunchIdle")
+	end)
+
+	self._cleaner:Add(self.Instance.Activated:Connect(function()
+		local now = os.clock()
+
+		if now < self._setCooldownEndsAt then
+			return
+		end
+
+		if self._lastPunch and now - self._lastPunch < PER_PUNCH_CD then
+			return
+		end
+
+		if self._lastPunch and now - self._lastPunch > SET_ALLOWANCE then
+			self._punchCount = 0
+		end
+
+		local character = LocalPlayer.Character
+		local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+		if not character or not rootPart then
+			return
+		end
+
+		self._lastPunch = now
+		self._punchCount += 1
+		AnimationController:PlayAnimation(`Punch{self._punchCount}`)
+		SoundController:PlaySound("Punch", rootPart, { PlaybackSpeed = Random.new():NextNumber(1, 1.2) }, nil, true)
+		self:_checkHit(character, rootPart)
+
+		if self._punchCount < MAX_PUNCH_SET then
+			return
+		end
+
+		self._setCooldownEndsAt = now + PER_SET_CD
+		self._punchCount = 0
+		self:OnSetCompleted()
+	end))
+end
+
+-- Checks a local forward hitbox and sends the first target candidate.
+function Punch:_checkHit(character: Model, rootPart: BasePart)
+	local hits = Hitbox.Hit(rootPart.CFrame * HITBOX_OFFSET, HITBOX_SIZE, { character })
+	for _, hitCharacter in hits do
+		local targetPlayer = Players:GetPlayerFromCharacter(hitCharacter)
+		if targetPlayer and targetPlayer ~= LocalPlayer then
+			RequestPunchHit:Fire({
+				TargetUserId = targetPlayer.UserId,
+			})
+			return
+		end
+	end
+end
+
+-- Hook for future server punch behavior.
+function Punch:OnSetCompleted() end
+
+function Punch:Stop()
+	self._cleaner:Destroy()
+end
+
+return Punch
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="498">
           <Properties>
             <string name="Name">RainbowColor</string>
             <string name="Source"><![CDATA[-- Services
@@ -48728,7 +50314,7 @@ return RainbowColor
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="489">
+        <Item class="ModuleScript" referent="499">
           <Properties>
             <string name="Name">RainbowStroke</string>
             <string name="Source"><![CDATA[-- Services
@@ -48776,7 +50362,7 @@ return RainbowStroke
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="490">
+        <Item class="ModuleScript" referent="500">
           <Properties>
             <string name="Name">UIHover</string>
             <string name="Source"><![CDATA[-- Services
@@ -48812,7 +50398,7 @@ return UIHover
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="491">
+        <Item class="ModuleScript" referent="501">
           <Properties>
             <string name="Name">UIPop</string>
             <string name="Source"><![CDATA[-- Services
@@ -48856,7 +50442,7 @@ return UIPop
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="492">
+        <Item class="ModuleScript" referent="502">
           <Properties>
             <string name="Name">UIPulse</string>
             <string name="Source"><![CDATA[-- Services
@@ -48900,7 +50486,7 @@ return UIPulse
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="493">
+        <Item class="ModuleScript" referent="503">
           <Properties>
             <string name="Name">UIRainbow</string>
             <string name="Source"><![CDATA[-- Services
@@ -48952,7 +50538,7 @@ return RainbowUI
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="494">
+        <Item class="ModuleScript" referent="504">
           <Properties>
             <string name="Name">UIRotate</string>
             <string name="Source"><![CDATA[-- Services
@@ -48981,7 +50567,7 @@ return UIRotate
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="495">
+        <Item class="ModuleScript" referent="505">
           <Properties>
             <string name="Name">UISway</string>
             <string name="Source"><![CDATA[-- Services
@@ -49026,7 +50612,7 @@ return UISway
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="496">
+        <Item class="ModuleScript" referent="506">
           <Properties>
             <string name="Name">VIP</string>
             <string name="Source"><![CDATA[-- Services

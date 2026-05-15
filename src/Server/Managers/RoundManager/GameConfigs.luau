@@ -7,13 +7,16 @@
 
 local GameConfigs = {
 	-- Match requirements
-	MIN_PLAYERS_TO_START = 2,
+	MIN_PLAYERS_TO_START = 3,
 
 	-- Stage durations (seconds)
 	INTERMISSION_DURATION = 18, -- countdown once min players are present
 	INIT_MATCH_PRE_STAGE_DELAY = 3, -- delay inside InitMatch stage before advancing to Match
 	INIT_MATCH_COUNTDOWN = 3, -- "get ready" countdown after spawn, before music starts
 	MATCH_END_CELEBRATION_DURATION = 6, -- celebration time after a winner is picked
+	LAST_ROUND_COUNTDOWN = 3, -- 3-2-1 countdown before the final 1v1 brawl starts
+	LAST_ROUND_ARENA_TARGET_SCALE = 0.1, -- arena model scale at the end of the final 1v1 shrink
+	LAST_ROUND_ARENA_SCALE_DURATION = 1.5 * 60, -- seconds to shrink the arena during the final 1v1
 
 	-- Elimination grace periods
 	PRE_ELIMINATION_GRACE = 3, -- seconds between "timer expired" and the actual elimination call (for client effects)

@@ -16,6 +16,8 @@
 	  :OnPreElimination(victimInfo)                 - server grace starts; victim about to be eliminated (play effects now)
 	  :OnPlayerEliminated(eliminatedInfo, remaining) - player was just eliminated
 	  :OnPostElimination(remainingCount)            - server grace starts; circle is about to reset (play effects now)
+	  :OnLastRoundCountdown(secondsLeft)            - final 1v1 brawl countdown; receives 3, 2, 1, then 0
+	  :OnLastRoundStarted(players)                  - final 1v1 brawl started; players are the two finalists
 	  :OnEliminationChoicePrompt(expirationTime)    - LOCAL ONLY; you were eliminated and the match still has > 2 alive — show LEAVE/RESPAWN UI
 	  :OnEliminationChoiceResolved(choice)          - LOCAL ONLY; the prompt was answered, timed out, or was cancelled — hide the UI
 	                                                  (`choice` is "Respawn" or "Leave"; call :RequestRespawn() / :RequestLeave() to answer)
@@ -93,6 +95,8 @@ local RoundController = {
 	OnMusicStartSignal = Signal.new(), -- (explosionTimestamp: number)
 	OnMusicStopSignal = Signal.new(),
 	OnMatchEndSignal = Signal.new(), -- (winner: { UserId, Name, DisplayName }?, placements: { [number]: any })
+	OnLastRoundCountdownSignal = Signal.new(), -- (secondsLeft: number) final 1v1 brawl countdown
+	OnLastRoundStartedSignal = Signal.new(), -- (players: { [number]: { [string]: any } }) final 1v1 brawl started
 	OnEliminationChoicePromptSignal = Signal.new(), -- (expirationTime: number)
 	OnEliminationChoiceResolvedSignal = Signal.new(), -- (choice: string) "Respawn" | "Leave"
 
@@ -104,6 +108,8 @@ local RoundController = {
 	PlayerEliminatedBridge = BridgeNet2.ReferenceBridge("PlayerEliminated"),
 	PostEliminationBridge = BridgeNet2.ReferenceBridge("PostElimination"),
 	MatchEndBridge = BridgeNet2.ReferenceBridge("MatchEnd"),
+	LastRoundCountdownBridge = BridgeNet2.ReferenceBridge("LastRoundCountdown"),
+	LastRoundStartedBridge = BridgeNet2.ReferenceBridge("LastRoundStarted"),
 	EliminationChoicePromptBridge = BridgeNet2.ReferenceBridge("EliminationChoicePrompt"),
 	EliminationChoiceResolvedBridge = BridgeNet2.ReferenceBridge("EliminationChoiceResolved"),
 	EliminationChoiceRequestBridge = BridgeNet2.ReferenceBridge("EliminationChoiceRequest"),
@@ -111,6 +117,7 @@ local RoundController = {
 	_roundReplica = nil,
 	_lastStage = nil,
 	_lastBombHolderUserId = nil,
+	_lastRoundFightMusicStarted = false,
 	_explosionTimestamp = 0,
 	_countdownEndsAt = 0,
 	--
@@ -347,6 +354,7 @@ function RoundController:OnEnterMatchAll()
 		Spr.target(inGame, 0.7, 2.5, { Position = UDim2.fromScale(0.5, 0.05) })
 	end)
 
+	self._lastRoundFightMusicStarted = false
 	SoundController:StartGameMusic(self:GetKey("MusicToPlay"))
 	SoundController:SwitchBGM("Game", 3.5)
 end
@@ -506,6 +514,7 @@ function RoundController:OnPostElimination(remainingCount: number)
 
 		Spr.target(readyText.UIScale, 0.45, 2, { Scale = 1 })
 		readyText.Visible = true
+		SoundController:PlaySound("StartRound")
 
 		self._gameCleaner:Add(task.delay(2.8, function()
 			Spr.target(readyText.UIScale, 0.5, 2, { Scale = 0 })
@@ -518,6 +527,44 @@ function RoundController:OnPostElimination(remainingCount: number)
 	end))
 
 	workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
+end
+
+-- Called during the final 1v1 brawl countdown.
+-- `secondsLeft` receives 3, 2, 1, then 0 when the brawl starts.
+function RoundController:OnLastRoundCountdown(secondsLeft: number)
+	if secondsLeft <= 0 or self._lastRoundFightMusicStarted then
+		return
+	end
+
+	self._lastRoundFightMusicStarted = true
+	SoundController:StartRandomFightMusic()
+	SoundController:SwitchBGM("Fight", 2.5)
+end
+
+-- Called when the final 1v1 brawl starts after the countdown finishes.
+function RoundController:OnLastRoundStarted(players: { [number]: { [string]: any } })
+	--
+	local ui = self.GameUI.Top
+	local inGame = ui.InGame
+	local finalRound = ui.FinalRound
+
+	if self:IsInMatch() then
+		Controls:Enable()
+	end
+
+	if not self._lastRoundFightMusicStarted then
+		SoundController:StartRandomFightMusic()
+		SoundController:SwitchBGM("Fight", 1)
+	end
+
+	--
+	finalRound.Title.Text =
+		`<font color="#00aaff">{players[1].Name:upper()}</font> vs <font color="#ff443e">{players[2].Name:upper()}</font>`
+
+	--
+	Spr.target(inGame, 0.7, 2.5, { Position = UDim2.fromScale(0.5, -0.5) })
+	Spr.target(finalRound, 0.7, 2.5, { Position = UDim2.fromScale(0.5, 0.05) })
+	self:ToggleGameControls(false)
 end
 
 -- Called whenever ANY player gets eliminated (including yourself).
@@ -764,6 +811,7 @@ function RoundController:OnMatchEnd(winner: { [string]: any }?, _placements: { [
 	local ui = self.GameUI
 	local top = ui.Top
 	local inGame = top.InGame
+	local finalRound = top.FinalRound
 	local middle = ui.Middle
 	local winnerFrame = top.Winner
 
@@ -772,6 +820,7 @@ function RoundController:OnMatchEnd(winner: { [string]: any }?, _placements: { [
 	-- Reset game ui back to normal
 	workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
 	Spr.target(inGame, 0.7, 2.5, { Position = UDim2.fromScale(0.5, -0.5) })
+	Spr.target(finalRound, 0.7, 2.5, { Position = UDim2.fromScale(0.5, -0.5) })
 	inGame.Title.UIScale.Scale = 1
 	middle.MusicStopped.UIScale.Scale = 0
 
@@ -793,6 +842,7 @@ function RoundController:OnMatchEnd(winner: { [string]: any }?, _placements: { [
 	-- _lastStage is intentionally left alone — it drives stage-change detection
 	-- and the upcoming Intermission transition still needs the previous value.
 	self._lastBombHolderUserId = nil
+	self._lastRoundFightMusicStarted = false
 	self._explosionTimestamp = 0
 	self._countdownEndsAt = 0
 	self._bomb = nil
@@ -910,6 +960,10 @@ function RoundController:_handleBombHolderChange(newHolderUserId: number?)
 	if not newHolderUserId then
 		self._lastBombHolderUserId = nil
 		self:TogglePassButtons(false)
+		AnimationController:StopAnimation("HoldBomb")
+		if self._bomb and self._bomb.Parent then
+			self._bomb.Parent = nil
+		end
 		return
 	end
 
@@ -1053,6 +1107,26 @@ function RoundController:OnStart()
 		end
 		self.OnPostEliminationSignal:Fire(payload.RemainingCount)
 		self:OnPostElimination(payload.RemainingCount or 0)
+	end)
+
+	-- Final 1v1 brawl countdown
+	self.LastRoundCountdownBridge:Connect(function(payload: any)
+		if typeof(payload) ~= "table" then
+			return
+		end
+		local secondsLeft = tonumber(payload.SecondsLeft) or 0
+		self.OnLastRoundCountdownSignal:Fire(secondsLeft)
+		self:OnLastRoundCountdown(secondsLeft)
+	end)
+
+	-- Final 1v1 brawl started
+	self.LastRoundStartedBridge:Connect(function(payload: any)
+		if typeof(payload) ~= "table" then
+			return
+		end
+		local players = payload.Players or {}
+		self.OnLastRoundStartedSignal:Fire(players)
+		self:OnLastRoundStarted(players)
 	end)
 
 	-- Elimination choice prompt (server -> this player only)

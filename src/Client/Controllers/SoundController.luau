@@ -19,6 +19,7 @@ local SoundController = {
 
 	_lastPlayedSounds = {},
 	_currentGameMusic = nil,
+	_currentBGMType = nil,
 	_muted = false,
 }
 
@@ -225,15 +226,23 @@ function SoundController:ToggleGameMusic(enabled: boolean, fadeDuration: number?
 	}):Play()
 end
 
-function SoundController:SwitchBGM(bgmType: "Game" | "Background", switchDuration: number?)
+function SoundController:SwitchBGM(bgmType: "Game" | "Background" | "Fight", switchDuration: number?)
 	local backgroundMusic = SoundService:FindFirstChild("BackgroundMusic", true)
 	local gameMusic = SoundService:FindFirstChild("GameMusic", true)
+	local fightSound = SoundService:FindFirstChild("FightSound", true)
+
+	if self._currentBGMType and self._currentBGMType == bgmType then
+		return
+	end
 
 	TweenService:Create(backgroundMusic, TweenInfo.new(switchDuration or 1, Enum.EasingStyle.Linear), {
 		Volume = bgmType == "Background" and 1 or 0,
 	}):Play()
 	TweenService:Create(gameMusic, TweenInfo.new(switchDuration or 1, Enum.EasingStyle.Linear), {
 		Volume = bgmType == "Game" and 1 or 0,
+	}):Play()
+	TweenService:Create(fightSound, TweenInfo.new(switchDuration or 1, Enum.EasingStyle.Linear), {
+		Volume = bgmType == "Fight" and 1 or 0,
 	}):Play()
 end
 
@@ -246,6 +255,29 @@ function SoundController:StartGameMusic(name: string)
 	local gameMusic = SoundService:FindFirstChild(name, true)
 	gameMusic:Play()
 	self._currentGameMusic = gameMusic
+end
+
+-- Starts a random fight music track for the final 1v1
+function SoundController:StartRandomFightMusic()
+	local fightSound = SoundService:FindFirstChild("FightSound", true)
+	if not fightSound then
+		warn("FightSound Sound Group not found in SoundService")
+		return
+	end
+
+	local sounds = fightSound:GetChildren()
+	if #sounds == 0 then
+		warn("FightSound Sound Group is empty")
+		return
+	end
+
+	if self._currentGameMusic then
+		self._currentGameMusic:Stop()
+	end
+
+	local randomFightMusic: Sound = sounds[math.random(1, #sounds)]
+	randomFightMusic:Play()
+	self._currentGameMusic = randomFightMusic
 end
 
 function SoundController:OnInit()
@@ -261,11 +293,11 @@ function SoundController:OnStart()
 	muteButton:setImage("rbxassetid://70577541005282", "Selected")
 
 	muteButton.selected:Connect(function()
-		self:MuteBGM(true)
+		self:SetBGMCoreVolume(0, 0.5)
 	end)
 
 	muteButton.deselected:Connect(function()
-		self:MuteBGM(false)
+		self:SetBGMCoreVolume(1, 0.5)
 	end)
 
 	-- Setup event handlers
