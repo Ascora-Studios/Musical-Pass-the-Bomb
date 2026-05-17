@@ -118,6 +118,7 @@ local RoundController = {
 	_lastStage = nil,
 	_lastBombHolderUserId = nil,
 	_lastRoundFightMusicStarted = false,
+	_lastRoundStartedKey = nil,
 	_explosionTimestamp = 0,
 	_countdownEndsAt = 0,
 	--
@@ -848,6 +849,7 @@ function RoundController:OnMatchEnd(winner: { [string]: any }?, _placements: { [
 	-- and the upcoming Intermission transition still needs the previous value.
 	self._lastBombHolderUserId = nil
 	self._lastRoundFightMusicStarted = false
+	self._lastRoundStartedKey = nil
 	self._explosionTimestamp = 0
 	self._countdownEndsAt = 0
 	self._bomb = nil
@@ -917,8 +919,25 @@ function RoundController:_fireEnterMatchHooks()
 	end)
 end
 
+-- Fires final-round start once per finalist pair, regardless of bridge or replica source.
+function RoundController:_fireLastRoundStarted(players: { [number]: { [string]: any } })
+	if typeof(players) ~= "table" or typeof(players[1]) ~= "table" or typeof(players[2]) ~= "table" then
+		return
+	end
+
+	local key = `{players[1].UserId or players[1].Name}:{players[2].UserId or players[2].Name}`
+	if self._lastRoundStartedKey == key then
+		return
+	end
+
+	self._lastRoundStartedKey = key
+	self.OnLastRoundStartedSignal:Fire(players)
+	self:OnLastRoundStarted(players)
+end
+
 function RoundController:_fireStageEntryHooks(newStage: string?, previousStage: string?)
 	if newStage == "Intermission" then
+		self._lastRoundStartedKey = nil
 		self.OnIntermissionStartedSignal:Fire()
 		self:OnIntermissionStart()
 
@@ -936,6 +955,7 @@ function RoundController:_fireStageEntryHooks(newStage: string?, previousStage: 
 		end
 	elseif newStage == "InitMatch" then
 		self._countdownEndsAt = 0
+		self._lastRoundStartedKey = nil
 		self:_fireEnterMatchHooks()
 	elseif newStage == "Match" then
 		-- A late joiner who arrives directly in "Match" never saw "InitMatch",
@@ -947,6 +967,9 @@ function RoundController:_fireStageEntryHooks(newStage: string?, previousStage: 
 		end
 		self.OnMatchStartedSignal:Fire()
 		self:OnMatchStart()
+
+		local lastRoundPlayers = self._roundReplica and self._roundReplica.Data.LastRoundPlayers
+		self:_fireLastRoundStarted(lastRoundPlayers)
 	end
 end
 
@@ -1033,6 +1056,8 @@ function RoundController:OnInit()
 				self:_handleStageChange(replica.Data.CurrentStage)
 			elseif key == "BombHolderUserId" then
 				self:_handleBombHolderChange(replica.Data.BombHolderUserId)
+			elseif key == "LastRoundPlayers" then
+				self:_fireLastRoundStarted(replica.Data.LastRoundPlayers)
 			elseif key == "IntermissionEndsAt" then
 				local endsAt = replica.Data.IntermissionEndsAt or 0
 				if self._lastStage == "Intermission" then
@@ -1130,8 +1155,7 @@ function RoundController:OnStart()
 			return
 		end
 		local players = payload.Players or {}
-		self.OnLastRoundStartedSignal:Fire(players)
-		self:OnLastRoundStarted(players)
+		self:_fireLastRoundStarted(players)
 	end)
 
 	-- Elimination choice prompt (server -> this player only)

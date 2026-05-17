@@ -18,10 +18,12 @@ function IntroController:RunIntro()
 
 	--
 	local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-	local humanoid: Humanoid = character.Humanoid
+	local humanoid: Humanoid = character:WaitForChild("Humanoid", 5)
 
 	--
-	humanoid.CameraOffset = Vector3.new(0, 5, 0)
+	if humanoid then
+		humanoid.CameraOffset = Vector3.new(0, 5, 0)
+	end
 	task.wait(5)
 
 	--

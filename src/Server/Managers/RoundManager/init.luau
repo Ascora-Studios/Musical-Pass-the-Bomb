@@ -160,6 +160,8 @@ RoundManager._lastRoundResolved = false
 RoundManager._lastRoundScaleThread = nil :: thread?
 RoundManager._lastRoundHitPart = nil :: BasePart?
 RoundManager._lastRoundTouchConnection = nil :: RBXScriptConnection?
+RoundManager._lastRoundPlayers = nil :: { Player }?
+RoundManager._lastRoundStartedPayload = nil :: { [string]: any }?
 RoundManager._arenaOriginalScale = 1
 
 ----------------------------------------------------------------
@@ -412,23 +414,37 @@ function RoundManager:_calculateSpawnCFrames(playerCount: number): { CFrame }
 end
 
 function RoundManager:_teleportPlayersToCircle()
-	local cframes = self:_calculateSpawnCFrames(#self._alive)
+	local alive = {}
+	for _, player in self._alive do
+		table.insert(alive, player)
+	end
+
+	local cframes = self:_calculateSpawnCFrames(#alive)
 
 	-- Load all unspawnable characters in parallel so no one player stalls the rest.
 	local pending = 0
-	for _, player in self._alive do
+	for _, player in alive do
 		if not isPlayerSpawnable(player) then
 			pending += 1
 			task.spawn(function()
-				local success, err = pcall(function()
-					local timeout = os.clock() + 5
-					player:LoadCharacterAsync()
-					repeat
-						task.wait()
-					until isPlayerSpawnable(player) or os.clock() >= timeout
-				end)
-				if not success then
-					warn(`[RoundManager] Failed to load character for {player.Name}: {err}`)
+				local timeout = os.clock() + 5
+				if player:IsDescendantOf(Players) then
+					task.spawn(function()
+						local success, err = pcall(function()
+							player:LoadCharacterAsync()
+						end)
+						if not success and player:IsDescendantOf(Players) then
+							warn(`[RoundManager] Failed to load character for {player.Name}: {err}`)
+						end
+					end)
+				end
+
+				repeat
+					task.wait()
+				until isPlayerSpawnable(player) or not player:IsDescendantOf(Players) or os.clock() >= timeout
+
+				if player:IsDescendantOf(Players) and not isPlayerSpawnable(player) then
+					warn(`[RoundManager] Timed out waiting for {player.Name} to become spawnable for circle teleport`)
 				end
 				pending -= 1
 			end)
@@ -438,16 +454,15 @@ function RoundManager:_teleportPlayersToCircle()
 		task.wait()
 	end
 
-	for i, player in self._alive do
+	for i, player in alive do
 		local cframe = cframes[i]
-		if not cframe then
+		if not cframe or not indexOf(self._alive, player) or not isPlayerSpawnable(player) then
 			continue
 		end
 
 		local character = player.Character
-		local hrp = character and character:FindFirstChild("HumanoidRootPart")
-		if hrp then
-			hrp.CFrame = cframe + Vector3.new(0, 3, 0)
+		if character then
+			character:PivotTo(cframe + Vector3.new(0, 3, 0))
 		end
 	end
 end
@@ -584,7 +599,7 @@ function RoundManager:_canRespawnFromEliminationChoice(player: Player): boolean
 		return false
 	end
 
-	if not self._matchActive then
+	if not self:IsMatchActive() then
 		return false
 	end
 
@@ -592,7 +607,11 @@ function RoundManager:_canRespawnFromEliminationChoice(player: Player): boolean
 		return false
 	end
 
-	if #self._alive < GameConfigs.ELIMINATION_CHOICE_MIN_REMAINING then
+	if self._lastRoundActive or self._lastRoundResolved then
+		return false
+	end
+
+	if #self._alive <= GameConfigs.ELIMINATION_CHOICE_MIN_REMAINING then
 		return false
 	end
 
@@ -616,7 +635,13 @@ function RoundManager:_respawnIntoMatch(player: Player): boolean
 		return false
 	end
 
-	if #self._alive < GameConfigs.ELIMINATION_CHOICE_MIN_REMAINING then
+	if self._lastRoundActive or self._lastRoundResolved then
+		warn(`[RoundManager] Respawn blocked for {player.Name}: last round is active or resolved`)
+		self:_returnToLobby(player)
+		return false
+	end
+
+	if #self._alive <= GameConfigs.ELIMINATION_CHOICE_MIN_REMAINING then
 		warn(`[RoundManager] Respawn blocked for {player.Name}: match is ending or has too few alive players`)
 		self:_returnToLobby(player)
 		return false
@@ -744,12 +769,20 @@ end
 
 function RoundManager:_handleRespawnProductPurchased(player: Player)
 	local entry = self._pendingChoices[player]
-	if not entry or entry.Resolved then
-		return
-	end
 
-	if not self:_canRespawnFromEliminationChoice(player) then
-		self:_resolveEliminationChoice(player, "Leave")
+	if not entry or entry.Resolved or not self:_canRespawnFromEliminationChoice(player) then
+		if entry and not entry.Resolved then
+			self:_resolveEliminationChoice(player, "Leave")
+		else
+			self:_returnToLobby(player)
+		end
+
+		CurrencyManager:IncrementCurrency(player, GameConfigs.RESPAWN_COMPENSATION_REWARD, true)
+		NotificationManager.NotifyNormalEvent:Fire(player, {
+			`The match was too far along to revive you, so you received <font color="#ffd400">{GameConfigs.RESPAWN_COMPENSATION_REWARD} Coins</font> instead.`,
+			4,
+			"RobuxPurchase",
+		})
 		return
 	end
 
@@ -1248,6 +1281,9 @@ function RoundManager:_endLastRound()
 	local wasActive = self._lastRoundActive
 	self._lastRoundActive = false
 	self._lastRoundResolved = true
+	self._lastRoundPlayers = nil
+	self._lastRoundStartedPayload = nil
+	self:_setReplicaValue("LastRoundPlayers", {})
 
 	if wasActive then
 		self.OnLastRoundEnded:Fire()
@@ -1362,13 +1398,17 @@ function RoundManager:_startLastRoundBrawl()
 		self._alive[1],
 		self._alive[2],
 	}
-
-	self.LastRoundStartedEvent:Fire(BridgeNet2.AllPlayers(), {
+	local lastRoundStartedPayload = {
 		Players = {
 			serializePlayer(lastRoundPlayers[1]),
 			serializePlayer(lastRoundPlayers[2]),
 		},
-	})
+	}
+	self._lastRoundPlayers = lastRoundPlayers
+	self._lastRoundStartedPayload = lastRoundStartedPayload
+	self:_setReplicaValue("LastRoundPlayers", lastRoundStartedPayload.Players)
+
+	self.LastRoundStartedEvent:Fire(BridgeNet2.AllPlayers(), lastRoundStartedPayload)
 	self.OnLastRoundStarted:Fire(lastRoundPlayers)
 
 	for _, player in self._alive do
@@ -1899,6 +1939,7 @@ function RoundManager:OnInit()
 			AlivePlayers = {},
 			Placements = {},
 			BombHolderUserId = nil,
+			LastRoundPlayers = {},
 			MusicToPlay = nil,
 			ExplosionTimestamp = 0,
 			IntermissionEndsAt = 0,
@@ -1925,6 +1966,9 @@ function RoundManager:OnStart()
 
 	Players.PlayerAdded:Connect(function(player: Player)
 		player:SetAttribute(PLAYER_IN_GAME_ATTRIBUTE, false)
+		if self:IsLastRoundActive() and self._lastRoundStartedPayload then
+			self.LastRoundStartedEvent:Fire(player, self._lastRoundStartedPayload)
+		end
 	end)
 
 	Players.PlayerRemoving:Connect(function(player: Player)

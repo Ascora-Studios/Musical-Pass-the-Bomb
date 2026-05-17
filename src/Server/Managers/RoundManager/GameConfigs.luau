@@ -38,10 +38,11 @@ local GameConfigs = {
 	-- Rewards
 	PARTICIPATION_REWARD = 10, -- given to all survivors when someone is eliminated
 	WINNER_REWARD = 200, -- given to last player standing
+	RESPAWN_COMPENSATION_REWARD = 50, -- Coins given when a paid respawn processes too late to revive
 
 	-- Spawning (relative to workspace.Main.Arena.Main)
 	SPAWN_HEIGHT_OFFSET = 2, -- studs above the arena top surface
-	SPAWN_RADIUS_PADDING = -20, -- pulls spawn ring slightly inside the arena edge
+	SPAWN_RADIUS_PADDING = -17, -- pulls spawn ring slightly inside the arena edge
 
 	-- Player movement
 	MATCH_WALKSPEED = 0, -- applied to all participants while the match is active
