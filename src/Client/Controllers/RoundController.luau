@@ -341,7 +341,6 @@ end
 function RoundController:OnEnterMatchAll()
 	-- Leaving intermission — ensure the dots animation is cleaned up.
 	self:_stopWaitingDots()
-	HudController:HideHud()
 
 	local ui = self.GameUI
 
@@ -366,6 +365,8 @@ function RoundController:OnEnterMatchAsPlayer()
 	local middle = ui.Middle
 	local readyText = middle.ReadyText
 	local bottom = ui.Bottom
+
+	HudController:HideHud()
 
 	readyText:AddTag("UISway")
 	readyText.UIScale.Scale = 0
@@ -395,7 +396,11 @@ end
 
 -- Called when InitMatch starts AND the local player is NOT in the alive list
 -- (joined mid-game). Use for: spectator camera, "Watching" UI, free-cam controls, etc.
-function RoundController:OnEnterMatchSpectator() end
+function RoundController:OnEnterMatchSpectator()
+	HudController:ShowHud()
+	self:ToggleGameControls(false)
+	self:TogglePassButtons(false)
+end
 
 -- Called when the Match stage actually starts (music timer is now ticking).
 -- Use for: starting the music sound on the client, showing the bomb timer UI,
