@@ -80,6 +80,16 @@ function Stage:OnEnd(roundManager)
 	end
 	self._endsAt = 0
 	roundManager:SetIntermissionEndsAt(0)
+
+	-- Lock in the match roster and pre-load characters BEFORE we transition
+	-- to InitMatch. The next _runStage call will fire the CurrentStage replica
+	-- update that triggers _fireEnterMatchHooks on clients; if we wait to
+	-- publish AlivePlayers until inside StartMatch, the 5s character-load
+	-- yield can drop the pruned list AFTER the client's task.defer'd
+	-- OnEnterMatchAsPlayer check has already run.
+	roundManager._alive = roundManager:GetEligiblePlayers()
+	roundManager:_waitForAliveCharactersAndPrune()
+	roundManager:_publishAliveList()
 end
 
 function Stage:ForceEnd(_roundManager) end

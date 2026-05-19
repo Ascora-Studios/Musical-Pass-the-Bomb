@@ -229,6 +229,7 @@ function UIController:OnInit()
 	SoundController = require(script.Parent.SoundController)
 
 	--
+	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
 
 	-- Disable Reset Button
 	task.spawn(function()

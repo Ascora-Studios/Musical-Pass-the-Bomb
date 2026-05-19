@@ -413,17 +413,20 @@ function RoundManager:_calculateSpawnCFrames(playerCount: number): { CFrame }
 	return cframes
 end
 
-function RoundManager:_teleportPlayersToCircle()
-	local alive = {}
+-- Loads characters in parallel for any player in self._alive who isn't
+-- spawnable, then prunes anyone who still isn't ready after the timeout.
+-- Dropped players are notified and dropped from self._alive so they don't
+-- leave a dead slot in the bomb circle. Does NOT publish the alive list —
+-- callers decide when to publish so the replica update can be batched with
+-- the CurrentStage change that triggers client-side InitMatch hooks.
+function RoundManager:_waitForAliveCharactersAndPrune(): boolean
+	local snapshot = {}
 	for _, player in self._alive do
-		table.insert(alive, player)
+		table.insert(snapshot, player)
 	end
 
-	local cframes = self:_calculateSpawnCFrames(#alive)
-
-	-- Load all unspawnable characters in parallel so no one player stalls the rest.
 	local pending = 0
-	for _, player in alive do
+	for _, player in snapshot do
 		if not isPlayerSpawnable(player) then
 			pending += 1
 			task.spawn(function()
@@ -443,9 +446,6 @@ function RoundManager:_teleportPlayersToCircle()
 					task.wait()
 				until isPlayerSpawnable(player) or not player:IsDescendantOf(Players) or os.clock() >= timeout
 
-				if player:IsDescendantOf(Players) and not isPlayerSpawnable(player) then
-					warn(`[RoundManager] Timed out waiting for {player.Name} to become spawnable for circle teleport`)
-				end
 				pending -= 1
 			end)
 		end
@@ -454,9 +454,35 @@ function RoundManager:_teleportPlayersToCircle()
 		task.wait()
 	end
 
-	for i, player in alive do
+	local prunedAny = false
+	for i = #self._alive, 1, -1 do
+		local player = self._alive[i]
+		if not isPlayerSpawnable(player) then
+			warn(`[RoundManager] Dropping {player.Name} from match: character not spawnable in time`)
+			table.remove(self._alive, i)
+			prunedAny = true
+			if NotificationManager and player:IsDescendantOf(Players) then
+				NotificationManager.NotifyNormalEvent:Fire(player, {
+					"You loaded in too late, sitting out this match.",
+					4,
+					"Reject",
+				})
+			end
+		end
+	end
+
+	return prunedAny
+end
+
+function RoundManager:_teleportPlayersToCircle()
+	if self:_waitForAliveCharactersAndPrune() then
+		self:_publishAliveList()
+	end
+
+	local cframes = self:_calculateSpawnCFrames(#self._alive)
+	for i, player in self._alive do
 		local cframe = cframes[i]
-		if not cframe or not indexOf(self._alive, player) or not isPlayerSpawnable(player) then
+		if not cframe then
 			continue
 		end
 
@@ -1440,9 +1466,11 @@ function RoundManager:_handleLastRoundHit(hit: BasePart)
 	self:_eliminate(player, true)
 end
 
--- Stage hook: called from InitMatch
+-- Stage hook: called from InitMatch.
+-- self._alive is populated + characters pre-loaded by Intermission.OnEnd so
+-- the pruned alive list lands on clients together with the InitMatch
+-- CurrentStage replica change (OnEnterMatchAsPlayer reads from it on the same frame).
 function RoundManager:StartMatch(): boolean
-	self._alive = self:GetEligiblePlayers()
 	self._placements = {}
 	self._matchActive = false
 	self._passesLocked = false
@@ -1462,14 +1490,12 @@ function RoundManager:StartMatch(): boolean
 	end
 	self:_stopMusicCycle()
 
-	local eligiblePlayerCount = #self._alive
-	if eligiblePlayerCount < GameConfigs.MIN_PLAYERS_TO_START then
+	if #self._alive < GameConfigs.MIN_PLAYERS_TO_START then
 		self._alive = {}
 		self:_publishAliveList()
 		return false
 	end
 
-	self:_publishAliveList()
 	self:_teleportPlayersToCircle()
 
 	-- Lock movement for all participants while the match is active
