@@ -139,6 +139,7 @@ function FriendController:OnStart()
 	friendIcon:setImage("rbxassetid://78605640824200")
 	friendIcon:setLabel("Invite Friends")
 	friendIcon:setOrder(2)
+	friendIcon:setRight()
 	friendIcon:oneClick(true)
 
 	friendIcon.selected:Connect(function()
