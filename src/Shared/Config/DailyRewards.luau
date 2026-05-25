@@ -44,7 +44,7 @@ DailyRewards.CLAIM_INTERVAL = 24 * 60 * 60 -- 24 hours in seconds
 DailyRewards.Data = {
 	{
 		Day = 1,
-		Title = "100 Bux",
+		Title = "100 Coins",
 		Type = "Currency",
 		Callback = function(player: Player)
 			if RunService:IsClient() then
@@ -68,7 +68,7 @@ DailyRewards.Data = {
 
 	{
 		Day = 3,
-		Title = "250 Bux",
+		Title = "250 Coins",
 		Type = "Currency",
 		Callback = function(player: Player)
 			if RunService:IsClient() then
@@ -81,7 +81,7 @@ DailyRewards.Data = {
 
 	{
 		Day = 4,
-		Title = "500 Bux",
+		Title = "500 Coins",
 		Type = "Currency",
 		Callback = function(player: Player)
 			if RunService:IsClient() then
@@ -94,7 +94,7 @@ DailyRewards.Data = {
 
 	{
 		Day = 5,
-		Title = "1,000 Bux",
+		Title = "1,000 Coins",
 		Type = "Currency",
 		Callback = function(player: Player)
 			if RunService:IsClient() then
@@ -107,7 +107,7 @@ DailyRewards.Data = {
 
 	{
 		Day = 6,
-		Title = "1,500 Bux",
+		Title = "1,500 Coins",
 		Type = "Currency",
 		Callback = function(player: Player)
 			if RunService:IsClient() then

@@ -7,6 +7,10 @@ return {
 		Currency = 0,
 		Abilities = {},
 
+		-- Bomb Skins
+		OwnedBombSkins = { Default = true },
+		EquippedBombSkin = "Default",
+
 		-- Core Shop Stuff
 		StarterPackStart = 0,
 		PurchasedOnceProducts = {},

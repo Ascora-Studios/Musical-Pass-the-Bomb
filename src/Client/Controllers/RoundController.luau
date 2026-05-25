@@ -55,8 +55,9 @@ local Signal = require(Packages.Signal)
 local Spr = require(Packages.Spr)
 
 --
-local Assets = ReplicatedStorage.Assets
-local Meshes = Assets.Meshes
+local Shared = ReplicatedStorage.Shared
+local BombSkins = require(Shared.Config.BombSkins)
+local TweenModelToCFrame = require(Shared.TweenModelToCFrame)
 
 --
 local LocalPlayer = Players.LocalPlayer
@@ -117,6 +118,7 @@ local RoundController = {
 	_roundReplica = nil,
 	_lastStage = nil,
 	_lastBombHolderUserId = nil,
+	_bombSkinId = nil :: string?,
 	_lastRoundFightMusicStarted = false,
 	_lastRoundStartedKey = nil,
 	_explosionTimestamp = 0,
@@ -406,13 +408,26 @@ end
 -- Called when the Match stage actually starts (music timer is now ticking).
 -- Use for: starting the music sound on the client, showing the bomb timer UI,
 -- enabling pass buttons, etc.
-function RoundController:OnMatchStart()
-	local bomb = self._gameCleaner:Clone(Meshes.Bomb)
-	bomb.Parent = workspace.Main
-	self._bomb = bomb
+-- Spawns a bomb model using the given holder's equipped skin (falls back to
+-- Default). The model is added to _gameCleaner so it cleans up with the match.
+function RoundController:_spawnBombModel(holder: Player?): Model
+	local skinId = (holder and holder:GetAttribute("EquippedBombSkin")) or "Default"
+	local skinData = BombSkins.GetBombFromId(skinId) or BombSkins.GetBombFromId("Default")
 
+	local bomb = self._gameCleaner:Clone(skinData.Model)
+	bomb.Parent = workspace.Main
+
+	self._bomb = bomb
+	self._bombSkinId = skinData.Id
+
+	return bomb
+end
+
+function RoundController:OnMatchStart()
 	local bombHolder = self:GetBombHolderUserId()
 	local player = bombHolder and Players:GetPlayerByUserId(bombHolder)
+
+	self:_spawnBombModel(player)
 
 	if player then
 		self:OnBombPassed(player, true, nil)
@@ -774,6 +789,17 @@ function RoundController:OnBombPassed(player: Player, skipAnim: boolean, fromPla
 		return
 	end
 
+	-- Swap to the new holder's equipped skin if it differs from the current
+	-- displayed skin. The new model spawns at the existing bomb's pivot so the
+	-- pass tween still feels continuous.
+	local newSkinId = player:GetAttribute("EquippedBombSkin") or "Default"
+	if newSkinId ~= self._bombSkinId then
+		local currentPivot = bomb:GetPivot()
+		bomb:Destroy()
+		bomb = self:_spawnBombModel(player)
+		bomb:PivotTo(currentPivot)
+	end
+
 	bomb.Parent = workspace.Main
 
 	if fromPlayer and fromPlayer.Character then
@@ -784,14 +810,12 @@ function RoundController:OnBombPassed(player: Player, skipAnim: boolean, fromPla
 		)
 	end
 
+	local targetCFrame = upperTorso:GetPivot() * CFrame.new(0, 0, -2.4)
+
 	if not skipAnim then
-		TweenService:Create(
-			bomb,
-			TweenInfo.new(0.5, Enum.EasingStyle.Quint),
-			{ CFrame = upperTorso:GetPivot() * CFrame.new(0, 0, -2.4) * CFrame.Angles(math.rad(-90), 0, 0) }
-		):Play()
+		TweenModelToCFrame(bomb, TweenInfo.new(0.5, Enum.EasingStyle.Quint), targetCFrame)
 	else
-		bomb.CFrame = upperTorso:GetPivot() * CFrame.new(0, 0, -2.4) * CFrame.Angles(math.rad(-90), 0, 0)
+		bomb:PivotTo(targetCFrame)
 	end
 
 	if player == LocalPlayer then
@@ -853,6 +877,7 @@ function RoundController:OnMatchEnd(winner: { [string]: any }?, _placements: { [
 	self._explosionTimestamp = 0
 	self._countdownEndsAt = 0
 	self._bomb = nil
+	self._bombSkinId = nil
 end
 
 ----------------------------------------------------------------

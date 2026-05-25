@@ -444,7 +444,7 @@ function AbilitiesManager:_purchaseAbilityWithCurrency(
 	if not abilityConfig.IsCurrencyPurchase then
 		notify(
 			player,
-			`<font color="#ffd400">{getAbilityName(ability, abilityConfig)}</font> cannot be purchased with Bux.`,
+			`<font color="#ffd400">{getAbilityName(ability, abilityConfig)}</font> cannot be purchased with Coins.`,
 			"Reject"
 		)
 		return false
@@ -461,7 +461,7 @@ function AbilitiesManager:_purchaseAbilityWithCurrency(
 		currencyNeeded = currencyNeeded or price
 		notify(
 			player,
-			`You need <font color="#2de200">{currencyNeeded} Bux</font> more to purchase <font color="#ffd400">{getAbilityName(
+			`You need <font color="#2de200">{currencyNeeded} Coins</font> more to purchase <font color="#ffd400">{getAbilityName(
 				ability,
 				abilityConfig
 			)}</font>`,

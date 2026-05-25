@@ -1,12 +1,23 @@
 local RandomUtil = {}
 
+-- Accepts either an existing Random instance (preferred for repeated draws so
+-- successive calls don't keep re-seeding to the same value) or a numeric seed.
+-- Returns a Random you can draw from.
+type RandomLike = number | Random
+local function resolveRng(seedOrRng: RandomLike?): Random
+	if typeof(seedOrRng) == "Random" then
+		return seedOrRng
+	end
+	return Random.new(seedOrRng or tick())
+end
+
 --[[
 	Selects a random item from weighted data.
 	@param data Array of {value, weight} pairs, e.g., { {"Common", 20}, {"Rare", 5} }
-	@param seed Optional seed for the random number generator
+	@param seedOrRng Optional seed (number) or an existing Random instance to draw from
 	@return The selected value and the full entry {value, weight}
 ]]
-function RandomUtil.GetResultFromWeight(data: { table }, seed: number?)
+function RandomUtil.GetResultFromWeight(data: { table }, seedOrRng: RandomLike?)
 	local totalWeight = 0
 	for _, entry in data do
 		totalWeight += entry[2]
@@ -16,7 +27,7 @@ function RandomUtil.GetResultFromWeight(data: { table }, seed: number?)
 		return nil, nil
 	end
 
-	local rng = Random.new(seed or tick())
+	local rng = resolveRng(seedOrRng)
 	local chosen = rng:NextNumber(0, totalWeight)
 
 	local accumulatedWeight = 0
@@ -101,11 +112,11 @@ end
 	Gets a random number between min and max (inclusive).
 	@param min Minimum value
 	@param max Maximum value
-	@param seed Optional seed for the random number generator
+	@param seedOrRng Optional seed (number) or an existing Random instance to draw from
 	@return Random number in range [min, max)
 ]]
-function RandomUtil.GetRandomFromMinMax(min: number, max: number, seed: number?): number
-	local rng = Random.new(seed or tick())
+function RandomUtil.GetRandomFromMinMax(min: number, max: number, seedOrRng: RandomLike?): number
+	local rng = resolveRng(seedOrRng)
 	return rng:NextNumber(min, max)
 end
 
@@ -113,22 +124,22 @@ end
 	Gets a random integer between min and max (inclusive).
 	@param min Minimum value
 	@param max Maximum value
-	@param seed Optional seed for the random number generator
+	@param seedOrRng Optional seed (number) or an existing Random instance to draw from
 	@return Random integer in range [min, max]
 ]]
-function RandomUtil.GetRandomIntFromMinMax(min: number, max: number, seed: number?): number
-	local rng = Random.new(seed or tick())
+function RandomUtil.GetRandomIntFromMinMax(min: number, max: number, seedOrRng: RandomLike?): number
+	local rng = resolveRng(seedOrRng)
 	return rng:NextInteger(min, max)
 end
 
 --[[
 	Returns true with the given percentage chance.
 	@param chance Percentage chance (0-100) to return true
-	@param seed Optional seed for the random number generator
+	@param seedOrRng Optional seed (number) or an existing Random instance to draw from
 	@return true if chance succeeds, false otherwise
 ]]
-function RandomUtil.RollChance(chance: number, seed: number?): boolean
-	local rng = Random.new(seed or tick())
+function RandomUtil.RollChance(chance: number, seedOrRng: RandomLike?): boolean
+	local rng = resolveRng(seedOrRng)
 	return rng:NextNumber(0, 100) < chance
 end
 

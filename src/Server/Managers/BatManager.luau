@@ -2,6 +2,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local StarterPlayers = game:GetService("StarterPlayer")
+local Debris = game:GetService("Debris")
 
 -- Packages
 local Packages = ReplicatedStorage.Packages
@@ -11,14 +12,16 @@ local BridgeNet2 = require(Packages.BridgeNet2)
 local Assets = ReplicatedStorage.Assets
 
 -- Constants
-local TOOL_NAME = "Punch"
+local TOOL_NAME = "BaseballBat"
+local COMPONENT_TAG = "Bat"
 local OWNER_ATTRIBUTE = "OwnerId"
 local REQUEST_COOLDOWN = 0.1
 local VALID_RANGE = 8
 local MIN_FORWARD_DOT = 0.2
-local KNOCKBACK_SPEED = 220
-local KNOCKBACK_UP_SPEED = 25
-local MAX_KNOCKBACK_SPEED = 90
+local KNOCKBACK_SPEED = 40
+local KNOCKBACK_UP_SPEED = 10
+local KNOCKBACK_DURATION = 0.18
+local KNOCKBACK_FORCE = 1e6
 local EQUIPPED_WALKSPEED = 10
 local EQUIPPED_JUMPPOWER = 0
 
@@ -27,11 +30,11 @@ local RoundManager
 local SoundManager
 
 --
-local PunchManager = {
-	RequestPunchHit = BridgeNet2.ReferenceBridge("RequestPunchHit"),
+local BatManager = {
+	RequestBatHit = BridgeNet2.ReferenceBridge("RequestBatHit"),
 
 	_tools = {} :: { [Player]: Tool },
-	_lastPunchAt = {} :: { [Player]: number },
+	_lastSwingAt = {} :: { [Player]: number },
 	_characterConnections = {} :: { [Player]: RBXScriptConnection },
 	_toolConnections = {} :: { [Player]: any },
 }
@@ -79,7 +82,7 @@ local function resetPlayerMovement(player: Player)
 	setPlayerMovement(player, StarterPlayers.CharacterWalkSpeed, StarterPlayers.CharacterJumpPower)
 end
 
-function PunchManager:_disconnectToolConnections(player: Player)
+function BatManager:_disconnectToolConnections(player: Player)
 	local connections = self._toolConnections[player]
 	if not connections then
 		return
@@ -92,8 +95,8 @@ function PunchManager:_disconnectToolConnections(player: Player)
 	self._toolConnections[player] = nil
 end
 
--- Removes any punch tool owned by the player from their backpack and character.
-function PunchManager:_removePlayerTool(player: Player)
+-- Removes any bat tool owned by the player from their backpack and character.
+function BatManager:_removePlayerTool(player: Player)
 	self:_disconnectToolConnections(player)
 	resetPlayerMovement(player)
 
@@ -120,14 +123,14 @@ function PunchManager:_removePlayerTool(player: Player)
 	end
 end
 
--- Gives and equips the final-round punch tool.
-function PunchManager:_givePlayerTool(player: Player)
+-- Gives and equips the final-round bat tool.
+function BatManager:_givePlayerTool(player: Player)
 	self:_removePlayerTool(player)
 
 	local toolsFolder = Assets:FindFirstChild("Tools")
 	local toolTemplate = toolsFolder and toolsFolder:FindFirstChild(TOOL_NAME)
 	if not toolTemplate or not toolTemplate:IsA("Tool") then
-		warn("[PunchManager] ReplicatedStorage.Assets.Tools.Punch is missing")
+		warn("[BatManager] ReplicatedStorage.Assets.Tools.BaseballBat is missing")
 		return
 	end
 
@@ -136,28 +139,28 @@ function PunchManager:_givePlayerTool(player: Player)
 		return
 	end
 
-	local punchTool = toolTemplate:Clone()
-	punchTool:SetAttribute(OWNER_ATTRIBUTE, player.UserId)
-	punchTool:AddTag(TOOL_NAME)
-	punchTool.Parent = backpack
-	self._tools[player] = punchTool
+	local batTool = toolTemplate:Clone()
+	batTool:SetAttribute(OWNER_ATTRIBUTE, player.UserId)
+	batTool:AddTag(COMPONENT_TAG)
+	batTool.Parent = backpack
+	self._tools[player] = batTool
 	self._toolConnections[player] = {
-		punchTool.Equipped:Connect(function()
+		batTool.Equipped:Connect(function()
 			setPlayerMovement(player, EQUIPPED_WALKSPEED, EQUIPPED_JUMPPOWER)
 		end),
-		punchTool.Unequipped:Connect(function()
+		batTool.Unequipped:Connect(function()
 			resetPlayerMovement(player)
 		end),
 	}
 
 	local humanoid = getHumanoid(player)
 	if humanoid then
-		humanoid:EquipTool(punchTool)
+		humanoid:EquipTool(batTool)
 	end
 end
 
--- Starts punch tooling for the two active finalists.
-function PunchManager:_startFinalRound(players: { Player })
+-- Starts bat tooling for the two active finalists.
+function BatManager:_startFinalRound(players: { Player })
 	self:_cleanupFinalRound()
 
 	for _, player in players do
@@ -167,8 +170,8 @@ function PunchManager:_startFinalRound(players: { Player })
 	end
 end
 
--- Clears punch tools and request state for the active final round.
-function PunchManager:_cleanupFinalRound()
+-- Clears bat tools and request state for the active final round.
+function BatManager:_cleanupFinalRound()
 	local playersWithTools = {}
 	for player in self._tools do
 		table.insert(playersWithTools, player)
@@ -178,11 +181,11 @@ function PunchManager:_cleanupFinalRound()
 		self:_removePlayerTool(player)
 	end
 
-	table.clear(self._lastPunchAt)
+	table.clear(self._lastSwingAt)
 end
 
--- Checks the attacker still owns an equipped or backpacked punch tool.
-function PunchManager:_hasOwnedPunchTool(player: Player): boolean
+-- Checks the attacker still owns an equipped or backpacked bat tool.
+function BatManager:_hasOwnedBatTool(player: Player): boolean
 	local tool = self._tools[player]
 	if tool and tool:GetAttribute(OWNER_ATTRIBUTE) == player.UserId and tool:IsDescendantOf(game) then
 		return true
@@ -209,7 +212,7 @@ function PunchManager:_hasOwnedPunchTool(player: Player): boolean
 end
 
 -- Validates a client hit candidate using server character positions.
-function PunchManager:_canPunchHit(attacker: Player, target: Player): boolean
+function BatManager:_canBatHit(attacker: Player, target: Player): boolean
 	if attacker == target then
 		return false
 	end
@@ -222,7 +225,7 @@ function PunchManager:_canPunchHit(attacker: Player, target: Player): boolean
 		return false
 	end
 
-	if not self:_hasOwnedPunchTool(attacker) then
+	if not self:_hasOwnedBatTool(attacker) then
 		return false
 	end
 
@@ -248,29 +251,36 @@ function PunchManager:_canPunchHit(attacker: Player, target: Player): boolean
 	return flatLook.Unit:Dot(flatOffset.Unit) >= MIN_FORWARD_DOT
 end
 
--- Pushes the target away from the attacker without ragdolling.
-function PunchManager:_pushTarget(attackerRoot: BasePart, targetRoot: BasePart)
+-- Pushes the target away from the attacker using a temporary LinearVelocity.
+function BatManager:_pushTarget(attackerRoot: BasePart, targetRoot: BasePart)
 	local offset = targetRoot.Position - attackerRoot.Position
-	local direction = Vector3.new(offset.X, 0, offset.Z)
-	if direction.Magnitude <= 0 then
-		direction = Vector3.new(attackerRoot.CFrame.LookVector.X, 0, attackerRoot.CFrame.LookVector.Z)
+	local flat = Vector3.new(offset.X, 0, offset.Z)
+	if flat.Magnitude <= 0 then
+		local look = attackerRoot.CFrame.LookVector
+		flat = Vector3.new(look.X, 0, look.Z)
 	end
-	if direction.Magnitude <= 0 then
+	if flat.Magnitude <= 0 then
 		return
 	end
 
-	local currentVelocity = targetRoot.AssemblyLinearVelocity
-	local horizontalVelocity = direction.Unit * KNOCKBACK_SPEED
-	if horizontalVelocity.Magnitude > MAX_KNOCKBACK_SPEED then
-		horizontalVelocity = horizontalVelocity.Unit * MAX_KNOCKBACK_SPEED
-	end
+	local velocity = flat.Unit * KNOCKBACK_SPEED + Vector3.new(0, KNOCKBACK_UP_SPEED, 0)
 
-	targetRoot.AssemblyLinearVelocity =
-		Vector3.new(horizontalVelocity.X, math.max(currentVelocity.Y, KNOCKBACK_UP_SPEED), horizontalVelocity.Z)
+	local attachment = Instance.new("Attachment")
+	attachment.Parent = targetRoot
+
+	local linearVelocity = Instance.new("LinearVelocity")
+	linearVelocity.Attachment0 = attachment
+	linearVelocity.RelativeTo = Enum.ActuatorRelativeTo.World
+	linearVelocity.MaxForce = KNOCKBACK_FORCE
+	linearVelocity.VectorVelocity = velocity
+	linearVelocity.Parent = targetRoot
+
+	Debris:AddItem(linearVelocity, KNOCKBACK_DURATION)
+	Debris:AddItem(attachment, KNOCKBACK_DURATION)
 end
 
--- Handles client punch hit requests after server-side validation.
-function PunchManager:_handlePunchHit(attacker: Player, payload: any)
+-- Handles client bat hit requests after server-side validation.
+function BatManager:_handleBatHit(attacker: Player, payload: any)
 	local targetUserId = parseTargetUserId(payload)
 	local target = targetUserId and Players:GetPlayerByUserId(targetUserId)
 	if not target then
@@ -278,12 +288,12 @@ function PunchManager:_handlePunchHit(attacker: Player, payload: any)
 	end
 
 	local now = workspace:GetServerTimeNow()
-	if now - (self._lastPunchAt[attacker] or 0) < REQUEST_COOLDOWN then
+	if now - (self._lastSwingAt[attacker] or 0) < REQUEST_COOLDOWN then
 		return
 	end
-	self._lastPunchAt[attacker] = now
+	self._lastSwingAt[attacker] = now
 
-	if not self:_canPunchHit(attacker, target) then
+	if not self:_canBatHit(attacker, target) then
 		return
 	end
 
@@ -294,15 +304,15 @@ function PunchManager:_handlePunchHit(attacker: Player, payload: any)
 	end
 
 	self:_pushTarget(attackerRoot, targetRoot)
-	SoundManager:PlayToPlayers("PunchHit", attackerRoot, { PlaybackSpeed = Random.new():NextNumber(0.8, 1.2) })
+	SoundManager:PlayToPlayers("SwingHit", attackerRoot, { PlaybackSpeed = Random.new():NextNumber(0.8, 1.2) })
 end
 
-function PunchManager:OnInit()
+function BatManager:OnInit()
 	RoundManager = require(script.Parent.RoundManager)
 	SoundManager = require(script.Parent.SoundManager)
 end
 
-function PunchManager:OnStart()
+function BatManager:OnStart()
 	RoundManager.OnLastRoundStarted:Connect(function(players: { Player })
 		self:_startFinalRound(players)
 	end)
@@ -311,8 +321,8 @@ function PunchManager:OnStart()
 		self:_cleanupFinalRound()
 	end)
 
-	self.RequestPunchHit:Connect(function(player: Player, payload: any)
-		self:_handlePunchHit(player, payload)
+	self.RequestBatHit:Connect(function(player: Player, payload: any)
+		self:_handleBatHit(player, payload)
 	end)
 
 	Players.PlayerAdded:Connect(function(player: Player)
@@ -323,7 +333,7 @@ function PunchManager:OnStart()
 
 	Players.PlayerRemoving:Connect(function(player: Player)
 		self:_removePlayerTool(player)
-		self._lastPunchAt[player] = nil
+		self._lastSwingAt[player] = nil
 
 		local connection = self._characterConnections[player]
 		if connection then
@@ -339,4 +349,4 @@ function PunchManager:OnStart()
 	end
 end
 
-return PunchManager
+return BatManager

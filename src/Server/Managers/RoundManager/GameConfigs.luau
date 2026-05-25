@@ -48,6 +48,10 @@ local GameConfigs = {
 	MATCH_WALKSPEED = 0, -- applied to all participants while the match is active
 	MATCH_JUMPPOWER = 0,
 
+	-- Bomb skin shop
+	BOMB_SKIN_SHOP_INTERVAL = 24 * 60 * 60, -- seconds between bomb skin shop re-rolls
+	BOMB_SKIN_SHOP_AMOUNT = 8, -- number of random skins shown in the shop displays
+
 	-- Bomb passing
 	PASS_COOLDOWN = 0.1, -- seconds between accepted pass attempts
 	VALID_PASS_DIRECTIONS = {
