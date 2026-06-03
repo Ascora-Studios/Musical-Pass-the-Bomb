@@ -825,8 +825,6 @@ function RoundController:OnBombPassed(player: Player, skipAnim: boolean, fromPla
 			`<font color="#55ff00">{player.Name:upper()}</font> IS HOLDING THE <font color="#ff0000">BOMB!</font>`
 	end
 
-	inGame.CoinHint.Visible = player == LocalPlayer
-
 	TweenService:Create(
 		inGame.Title.UIScale,
 		TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut, 0, true),
