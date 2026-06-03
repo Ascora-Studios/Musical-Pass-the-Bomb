@@ -152,6 +152,7 @@ RoundManager._lockTarget = nil :: Player?
 RoundManager._lockTargetExpiresAt = 0
 RoundManager._nukeActive = false
 RoundManager._suppressNextMusicStop = false
+RoundManager._bombHoldRewardThread = nil :: thread?
 RoundManager._pendingChoices =
 	{} :: { [Player]: { Resolved: boolean, Thread: thread?, PurchasePending: boolean?, ProductId: string? } }
 RoundManager._eliminationBoardTitle = nil :: TextLabel?
@@ -275,6 +276,38 @@ end
 
 function RoundManager:_publishBombHolder(player: Player?)
 	self:_setReplicaValue("BombHolderUserId", player and player.UserId or nil)
+end
+
+function RoundManager:_runBombHoldReward(player: Player?)
+	if self._bombHoldRewardThread then
+		task.cancel(self._bombHoldRewardThread)
+		self._bombHoldRewardThread = nil
+	end
+
+	if not player or not CurrencyManager then
+		return
+	end
+
+	self._bombHoldRewardThread = task.spawn(function()
+		while BombManager:GetHolder() == player do
+			task.wait(
+				RandomUtil.GetRandomFromMinMax(
+					GameConfigs.BOMB_HOLD_REWARD_INTERVAL.Min,
+					GameConfigs.BOMB_HOLD_REWARD_INTERVAL.Max
+				)
+			)
+			if BombManager:GetHolder() ~= player then
+				break
+			end
+			CurrencyManager:IncrementCurrency(
+				player,
+				RandomUtil.GetRandomIntFromMinMax(
+					GameConfigs.BOMB_HOLD_REWARD_RANGE.Min,
+					GameConfigs.BOMB_HOLD_REWARD_RANGE.Max
+				)
+			)
+		end
+	end)
 end
 
 function RoundManager:_publishExplosionTimestamp()
@@ -2003,6 +2036,7 @@ function RoundManager:OnStart()
 
 	BombManager.OnHolderChanged:Connect(function(player: Player?)
 		self:_publishBombHolder(player)
+		self:_runBombHoldReward(player)
 	end)
 
 	BombManager.RequestBombPass:Connect(function(player: Player, payload: any)

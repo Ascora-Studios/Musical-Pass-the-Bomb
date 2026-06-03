@@ -39,6 +39,8 @@ local GameConfigs = {
 	PARTICIPATION_REWARD = 10, -- given to all survivors when someone is eliminated
 	WINNER_REWARD = 200, -- given to last player standing
 	RESPAWN_COMPENSATION_REWARD = 50, -- Coins given when a paid respawn processes too late to revive
+	BOMB_HOLD_REWARD_RANGE = NumberRange.new(1, 5), -- coins given to the bomb holder each tick
+	BOMB_HOLD_REWARD_INTERVAL = NumberRange.new(2.5, 3.5), -- seconds between bomb-holder coin payouts
 
 	-- Spawning (relative to workspace.Main.Arena.Main)
 	SPAWN_HEIGHT_OFFSET = 2, -- studs above the arena top surface

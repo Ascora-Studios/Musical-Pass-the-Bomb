@@ -25,7 +25,7 @@ local CurrencyController = {
 
 function CurrencyController:OnIncrementCurrency(new: number, old: number?)
 	local hudUI = self.HudUI
-	local currency = hudUI.Left.Currency
+	local currency = hudUI.BottomLeft.Currency
 
 	if self._previousThread then
 		task.cancel(self._previousThread)
@@ -54,7 +54,7 @@ function CurrencyController:OnIncrementCurrency(new: number, old: number?)
 
 	-- if coin increased then do effe
 	if difference > 0 then
-		EffectController:RunEffect("CoinReceived", LocalPlayer)
+		EffectController:RunEffect("CoinReceived", LocalPlayer, true)
 	end
 end
 
@@ -65,7 +65,7 @@ function CurrencyController:OnInit()
 	self.HudUI = PlayerGui:WaitForChild("HudUI")
 
 	PlayerDataController:GetReplica():andThen(function(replica)
-		self.HudUI.Left.Currency.Amount.Text = GuiUtil.ConvertNumberWithCommas(replica.Data.Currency)
+		self.HudUI.BottomLeft.Currency.Amount.Text = GuiUtil.ConvertNumberWithCommas(replica.Data.Currency)
 		replica:OnSet({ "Currency" }, function(new, old)
 			self:OnIncrementCurrency(new, old)
 		end)

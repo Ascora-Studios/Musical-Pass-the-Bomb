@@ -33,7 +33,7 @@ BombSkins.Data = {
 		Id = "Blue",
 		Name = "Blue",
 		Rarity = "Common",
-		Price = 120,
+		Price = 200,
 	},
 
 	{
@@ -47,42 +47,42 @@ BombSkins.Data = {
 		Id = "Green",
 		Name = "Green",
 		Rarity = "Common",
-		Price = 120,
+		Price = 220,
 	},
 
 	{
 		Id = "Magenta",
 		Name = "Magenta",
 		Rarity = "Common",
-		Price = 120,
+		Price = 300,
 	},
 
 	{
 		Id = "Pink",
 		Name = "Pink",
 		Rarity = "Common",
-		Price = 120,
+		Price = 270,
 	},
 
 	{
 		Id = "Red",
 		Name = "Red",
 		Rarity = "Common",
-		Price = 120,
+		Price = 220,
 	},
 
 	{
 		Id = "White",
 		Name = "White",
 		Rarity = "Common",
-		Price = 120,
+		Price = 250,
 	},
 
 	{
 		Id = "Yellow",
 		Name = "Yellow",
 		Rarity = "Common",
-		Price = 120,
+		Price = 240,
 	},
 
 	------------- [[ RARE BOMBS ]] -------------
@@ -90,49 +90,49 @@ BombSkins.Data = {
 		Id = "Acid",
 		Name = "Acid",
 		Rarity = "Rare",
-		Price = 600,
+		Price = 850,
 	},
 
 	{
 		Id = "Diamond",
 		Name = "Diamond",
 		Rarity = "Rare",
-		Price = 600,
+		Price = 1300,
 	},
 
 	{
 		Id = "Emerald",
 		Name = "Emerald",
 		Rarity = "Rare",
-		Price = 600,
+		Price = 1150,
 	},
 
 	{
 		Id = "Radioactive",
 		Name = "Radioactive",
 		Rarity = "Rare",
-		Price = 600,
+		Price = 900,
 	},
 
 	{
 		Id = "Ruby",
 		Name = "Ruby",
 		Rarity = "Rare",
-		Price = 600,
+		Price = 1100,
 	},
 
 	{
 		Id = "Snow",
 		Name = "Snow",
 		Rarity = "Rare",
-		Price = 600,
+		Price = 750,
 	},
 
 	{
 		Id = "Thunder",
 		Name = "Thunder",
 		Rarity = "Rare",
-		Price = 600,
+		Price = 1000,
 	},
 
 	------------- [[ EPIC BOMBS ]] -------------
@@ -140,49 +140,49 @@ BombSkins.Data = {
 		Id = "BubbleGum",
 		Name = "Bubble Gum",
 		Rarity = "Epic",
-		Price = 1200,
+		Price = 2400,
 	},
 
 	{
 		Id = "Fiery",
 		Name = "Fiery",
 		Rarity = "Epic",
-		Price = 1200,
+		Price = 3400,
 	},
 
 	{
 		Id = "Mint",
 		Name = "Mint",
 		Rarity = "Epic",
-		Price = 1200,
+		Price = 2200,
 	},
 
 	{
 		Id = "Ocean",
 		Name = "Ocean",
 		Rarity = "Epic",
-		Price = 1200,
+		Price = 2600,
 	},
 
 	{
 		Id = "Shadow",
 		Name = "Shadow",
 		Rarity = "Epic",
-		Price = 1200,
+		Price = 3200,
 	},
 
 	{
 		Id = "Sunrise",
 		Name = "Sunrise",
 		Rarity = "Epic",
-		Price = 1200,
+		Price = 2800,
 	},
 
 	{
 		Id = "Toxic",
 		Name = "Toxic",
 		Rarity = "Epic",
-		Price = 1200,
+		Price = 3000,
 	},
 
 	------------- [[ LEGENDARY BOMBS ]] -------------
@@ -190,28 +190,28 @@ BombSkins.Data = {
 		Id = "Blazing",
 		Name = "Blazing",
 		Rarity = "Legendary",
-		Price = 2400,
+		Price = 5500,
 	},
 
 	{
 		Id = "Electric",
 		Name = "Electric",
 		Rarity = "Legendary",
-		Price = 2400,
+		Price = 5000,
 	},
 
 	{
 		Id = "Inferno",
 		Name = "Inferno",
 		Rarity = "Legendary",
-		Price = 2400,
+		Price = 6200,
 	},
 
 	{
 		Id = "RadiantMajesty",
 		Name = "Radiant Majesty",
 		Rarity = "Legendary",
-		Price = 2400,
+		Price = 7000,
 	},
 } :: { BombSkin }
 

@@ -9,21 +9,33 @@ local BridgeNet2 = require(Packages.BridgeNet2)
 local Effects = script.Parent.Parent.Effects
 
 --
-local RunEffect = BridgeNet2.ReferenceBridge("RunEffect")
 
 --
 local EffectController = {
+	RunEffectEvent = BridgeNet2.ReferenceBridge("RunEffect"),
+	ReplicateEffectEvent = BridgeNet2.ReferenceBridge("ReplicateEffect"),
+
 	_effects = {},
 }
 
-function EffectController:RunEffect(effect: string, ...)
+function EffectController:RunEffect(effect: string, data: { any }, replicate: boolean?)
 	local effectModule = self._effects[effect]
 	if not effectModule then
 		warn("Effect not found:", effect)
 		return
 	end
 
-	return effectModule(...)
+	local isTable = typeof(data) == "table"
+	if not isTable then
+		data = { data }
+	end
+
+	if replicate then
+		self.ReplicateEffectEvent:Fire({ effect, data })
+	end
+
+	-- pretty hardcoded but im lazy bru
+	return effectModule(if effect == "Confetti" then data else table.unpack(data))
 end
 
 function EffectController:OnInit()
@@ -38,7 +50,7 @@ function EffectController:OnInit()
 end
 
 function EffectController:OnStart()
-	RunEffect:Connect(function(data: { any })
+	self.RunEffectEvent:Connect(function(data: { any })
 		self:RunEffect(table.unpack(data))
 	end)
 end
