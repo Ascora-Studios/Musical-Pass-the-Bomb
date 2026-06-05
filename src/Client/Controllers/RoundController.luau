@@ -74,6 +74,7 @@ local UIController
 local SoundController
 local PlayerDataController
 local AnimationController
+local AbilitiesController
 
 --
 local RoundController = {
@@ -93,6 +94,7 @@ local RoundController = {
 	OnPostEliminationSignal = Signal.new(), -- (remainingCount) fired during POST_ELIMINATION_GRACE
 	OnReceiveBombSignal = Signal.new(),
 	OnOtherPlayerReceiveBombSignal = Signal.new(), -- (player: Player?, userId: number)
+	OnBombSpawnedSignal = Signal.new(), -- (bomb: Model) the bomb model was (re)created; effects can re-attach
 	OnMusicStartSignal = Signal.new(), -- (explosionTimestamp: number)
 	OnMusicStopSignal = Signal.new(),
 	OnMatchEndSignal = Signal.new(), -- (winner: { UserId, Name, DisplayName }?, placements: { [number]: any })
@@ -114,6 +116,7 @@ local RoundController = {
 	EliminationChoicePromptBridge = BridgeNet2.ReferenceBridge("EliminationChoicePrompt"),
 	EliminationChoiceResolvedBridge = BridgeNet2.ReferenceBridge("EliminationChoiceResolved"),
 	EliminationChoiceRequestBridge = BridgeNet2.ReferenceBridge("EliminationChoiceRequest"),
+	RevengeConsumedBridge = BridgeNet2.ReferenceBridge("RevengeConsumed"),
 
 	_roundReplica = nil,
 	_lastStage = nil,
@@ -240,13 +243,20 @@ function RoundController:RequestLeave()
 	self.EliminationChoiceRequestBridge:Fire({ Choice = "Leave" })
 end
 
+-- Answer the elimination prompt with REVENGE. Server will prompt the purchase
+-- and, on success, eliminate whoever passed you the bomb (you still leave).
+-- Server silently ignores this if you don't currently have an active prompt.
+function RoundController:RequestRevenge()
+	self.EliminationChoiceRequestBridge:Fire({ Choice = "Revenge" })
+end
+
 ----------------------------------------------------------------
 -- ↓↓↓ HOOKS — fill these in for your UI / VFX / SFX / camera ↓↓↓
 ----------------------------------------------------------------
 
 function RoundController:ToggleGameControls(show: boolean)
 	local ui = self.GameUI
-	Spr.target(ui.Bottom, 0.7, 2.5, { Position = show and UDim2.fromScale(0.5, 0.72) or UDim2.fromScale(0.5, 1.1) })
+	Spr.target(ui.Bottom, 0.7, 2.5, { Position = show and UDim2.fromScale(0.5, 0.72) or UDim2.fromScale(0.5, 1.2) })
 end
 
 function RoundController:TogglePassButtons(show: boolean)
@@ -370,6 +380,7 @@ function RoundController:OnEnterMatchAsPlayer()
 	local bottom = ui.Bottom
 
 	HudController:HideHud()
+	AbilitiesController:ToggleDisplay(true)
 
 	readyText:AddTag("UISway")
 	readyText.UIScale.Scale = 0
@@ -401,6 +412,7 @@ end
 -- (joined mid-game). Use for: spectator camera, "Watching" UI, free-cam controls, etc.
 function RoundController:OnEnterMatchSpectator()
 	HudController:ShowHud()
+	AbilitiesController:ToggleDisplay(false)
 	self:ToggleGameControls(false)
 	self:TogglePassButtons(false)
 end
@@ -419,6 +431,10 @@ function RoundController:_spawnBombModel(holder: Player?): Model
 
 	self._bomb = bomb
 	self._bombSkinId = skinData.Id
+
+	-- The bomb model is destroyed and re-cloned on skin-change passes; let ability
+	-- effects (e.g. Fire Bomb) re-attach to the fresh model.
+	self.OnBombSpawnedSignal:Fire(bomb)
 
 	return bomb
 end
@@ -573,6 +589,9 @@ function RoundController:OnLastRoundStarted(players: { [number]: { [string]: any
 		Controls:Enable()
 	end
 
+	AbilitiesController:ToggleDisplay(false)
+	AbilitiesController:ToggleUI(false)
+
 	if not self._lastRoundFightMusicStarted then
 		SoundController:StartRandomFightMusic()
 		SoundController:SwitchBGM("Fight", 1)
@@ -598,6 +617,7 @@ function RoundController:OnPlayerEliminated(elimatedInfo: { [string]: any }?, re
 		self._passCleaner:Clean()
 		self._musicStopCleaner:Clean()
 		HudController:HideHud()
+		AbilitiesController:ToggleDisplay(false)
 		self:ToggleGameControls(false)
 		self:TogglePassButtons(false)
 		Controls:Enable()
@@ -617,18 +637,28 @@ end
 -- to drive a countdown on the buttons. The server's clock is
 -- the source of truth — if your UI countdown drifts, the server will resolve on
 -- its own and OnEliminationChoiceResolved will fire.
--- Use :RequestRespawn() / :RequestLeave() to send the answer.
-function RoundController:OnEliminationChoicePrompt(expirationTime: number)
+-- Use :RequestRespawn() / :RequestLeave() / :RequestRevenge() to send the answer.
+-- `revengeTarget` is the serialized player who passed you the bomb (or nil if
+-- there's no valid target, in which case the Revenge button is hidden).
+function RoundController:OnEliminationChoicePrompt(expirationTime: number, revengeTarget: { [string]: any }?)
 	--
 	local ui = self.RespawnUI
 	local holder = ui.Holder
 	local buttons = holder.Buttons
 
+	buttons.Revenge.Visible = revengeTarget ~= nil
+	if revengeTarget then
+		buttons.Revenge.Description.Text =
+			`<font color="#ff0000">Kill</font> {revengeTarget.DisplayName or revengeTarget.Name}`
+	end
+
 	PlayerDataController:GetReplica():andThen(function(replica)
 		local firstPurchaseOfTheDay = replica.Data.FirstPurchaseOfTheDay or {}
 		local firstRespawnOfTheDay = firstPurchaseOfTheDay.Respawn
+		local firstRevengeOfTheDay = firstPurchaseOfTheDay.Revenge
 
 		buttons.Respawn.DiscountText.Visible = not firstRespawnOfTheDay or firstRespawnOfTheDay <= os.time()
+		buttons.Revenge.DiscountText.Visible = not firstRevengeOfTheDay or firstRevengeOfTheDay <= os.time()
 	end)
 
 	HudController:HideHud()
@@ -641,6 +671,12 @@ function RoundController:OnEliminationChoicePrompt(expirationTime: number)
 	self._respawnCleaner:Add(UIController:BindButtonClick(buttons.Leave, function()
 		self:RequestLeave()
 	end, true))
+
+	if revengeTarget then
+		self._respawnCleaner:Add(UIController:BindButtonClick(buttons.Revenge, function()
+			self:RequestRevenge()
+		end, true))
+	end
 
 	local promptDuration = math.max(0, expirationTime - workspace:GetServerTimeNow())
 	self._respawnCleaner:Add(task.spawn(function()
@@ -668,9 +704,11 @@ function RoundController:OnEliminationChoiceResolved(choice: string)
 
 	if choice == "Respawn" then
 		HudController:HideHud()
+		AbilitiesController:ToggleDisplay(true)
 		self:ToggleGameControls(true)
 	else
 		HudController:ShowHud()
+		AbilitiesController:ToggleDisplay(false)
 	end
 
 	UIController:CloseFrame(holder)
@@ -856,6 +894,7 @@ function RoundController:OnMatchEnd(winner: { [string]: any }?, _placements: { [
 
 	self:ToggleGameControls(false)
 	HudController:HideHud()
+	AbilitiesController:ToggleDisplay(false)
 	Controls:Enable()
 
 	self._gameCleaner:Clean()
@@ -1056,6 +1095,7 @@ function RoundController:OnInit()
 	HudController = require(script.Parent.HudController)
 	AnimationController = require(script.Parent.AnimationController)
 	PlayerDataController = require(script.Parent.PlayerDataController)
+	AbilitiesController = require(script.Parent.AbilitiesController)
 
 	--
 	self.GameUI = PlayerGui:WaitForChild("GameUI")
@@ -1194,7 +1234,7 @@ function RoundController:OnStart()
 			expirationTime = workspace:GetServerTimeNow() + duration
 		end
 		self.OnEliminationChoicePromptSignal:Fire(expirationTime)
-		self:OnEliminationChoicePrompt(expirationTime)
+		self:OnEliminationChoicePrompt(expirationTime, payload.RevengeTarget)
 	end)
 
 	-- Elimination choice resolved (server -> this player only)
@@ -1205,6 +1245,12 @@ function RoundController:OnStart()
 		local choice = payload.Choice or "Leave"
 		self.OnEliminationChoiceResolvedSignal:Fire(choice)
 		self:OnEliminationChoiceResolved(choice)
+	end)
+
+	-- Revenge consumed (server -> this player only): hide the button for the
+	-- rest of this prompt. It re-shows next round if there's a valid target.
+	self.RevengeConsumedBridge:Connect(function()
+		self.RespawnUI.Holder.Buttons.Revenge.Visible = false
 	end)
 
 	-- Match end broadcast (winner + final placements)

@@ -128,6 +128,7 @@ local RoundManager = {
 	EliminationChoicePromptEvent = BridgeNet2.ReferenceBridge("EliminationChoicePrompt"),
 	EliminationChoiceResolvedEvent = BridgeNet2.ReferenceBridge("EliminationChoiceResolved"),
 	EliminationChoiceRequestEvent = BridgeNet2.ReferenceBridge("EliminationChoiceRequest"),
+	RevengeConsumedEvent = BridgeNet2.ReferenceBridge("RevengeConsumed"),
 
 	-- Stage state
 	_currentStageName = FIRST_STAGE,
@@ -146,15 +147,29 @@ RoundManager._explosionTimestamp = 0
 RoundManager._musicDuration = 0
 RoundManager._passesLocked = false
 RoundManager._lastPassAt = 0
-RoundManager._activeShields = {} :: { [Player]: boolean }
-RoundManager._activeReflects = {} :: { [Player]: boolean }
-RoundManager._lockTarget = nil :: Player?
-RoundManager._lockTargetExpiresAt = 0
-RoundManager._nukeActive = false
 RoundManager._suppressNextMusicStop = false
+-- Ability hook bus. Abilities register handlers here during their one-time
+-- Setup so RoundManager never has to know any ability by name. ResolvePassTarget
+-- and PrePass/PostPass short-circuit on the first truthy handler; the rest fan out.
+RoundManager._hooks = {
+	ResolvePassTarget = {}, -- (holder, direction) -> Player?  first non-nil wins
+	PrePass = {}, -- (from, target) -> boolean  true = pass cancelled
+	PostPass = {}, -- (from, target) -> boolean  true = pass handled
+	HolderPreEliminate = {}, -- (holder)
+	MatchReset = {}, -- ()
+	PlayerRemoved = {}, -- (player)
+}
 RoundManager._bombHoldRewardThread = nil :: thread?
-RoundManager._pendingChoices =
-	{} :: { [Player]: { Resolved: boolean, Thread: thread?, PurchasePending: boolean?, ProductId: string? } }
+RoundManager._pendingChoices = {} :: {
+	[Player]: {
+		Resolved: boolean,
+		Thread: thread?,
+		PurchasePending: boolean?,
+		ProductId: string?,
+		RevengeTarget: Player?,
+	},
+}
+RoundManager._lastPasser = {} :: { [Player]: Player } -- who last passed the bomb to each holder (for Revenge)
 RoundManager._eliminationBoardTitle = nil :: TextLabel?
 RoundManager._lastRoundActive = false
 RoundManager._lastRoundResolved = false
@@ -188,8 +203,25 @@ local function resetPlayerMovement(player: Player)
 	setPlayerMovement(player, StarterPlayers.CharacterWalkSpeed, StarterPlayers.CharacterJumpPower)
 end
 
+local function restorePlayerHealth(player: Player)
+	local character = player.Character
+	if not character then
+		return
+	end
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		return
+	end
+
+	humanoid.Health = humanoid.MaxHealth
+end
+
 local function isRespawnProductId(productId: string): boolean
 	return productId == GameConfigs.RESPAWN_PRODUCT_ID or productId == GameConfigs.FIRST_RESPAWN_PRODUCT_ID
+end
+
+local function isRevengeProductId(productId: string): boolean
+	return productId == GameConfigs.REVENGE_PRODUCT_ID or productId == GameConfigs.FIRST_REVENGE_PRODUCT_ID
 end
 
 local function isPlayerSpawnable(player: Player): boolean
@@ -231,6 +263,36 @@ local function serializePlayer(player: Player?)
 	end
 
 	return player
+end
+
+----------------------------------------------------------------
+-- Ability hook bus
+----------------------------------------------------------------
+
+function RoundManager:RegisterHook(name: string, fn: (...any) -> ...any)
+	local handlers = self._hooks[name]
+	if not handlers then
+		error(`Unknown round hook '{name}'`)
+	end
+	table.insert(handlers, fn)
+end
+
+-- Runs every handler for a fire-and-forget hook.
+function RoundManager:_fireHook(name: string, ...)
+	for _, fn in self._hooks[name] do
+		fn(...)
+	end
+end
+
+-- Runs handlers until one returns a truthy value, then returns it.
+function RoundManager:_resolveHook(name: string, ...): any
+	for _, fn in self._hooks[name] do
+		local result = fn(...)
+		if result then
+			return result
+		end
+	end
+	return nil
 end
 
 ----------------------------------------------------------------
@@ -574,11 +636,11 @@ function RoundManager:_eliminate(player: Player, suppressChoicePrompt: boolean?)
 
 	self._eliminationBoardTitle.Text = `{player.Name:upper()} HAS BEEN <font color="#ff0000">ELIMINATED</font>`
 
-	self._activeShields[player] = nil
-	self._activeReflects[player] = nil
-	if self._lockTarget == player then
-		self:_clearLockTarget(false)
-	end
+	self:_fireHook("PlayerRemoved", player)
+	-- Capture who passed them the bomb before clearing, so the elimination
+	-- choice prompt below can offer Revenge against them.
+	local revengePasser = self._lastPasser[player]
+	self._lastPasser[player] = nil
 
 	table.remove(self._alive, idx)
 	-- earliest eliminated -> last in placements (we insert at the front each time)
@@ -623,7 +685,7 @@ function RoundManager:_eliminate(player: Player, suppressChoicePrompt: boolean?)
 	if #self._alive > GameConfigs.ELIMINATION_CHOICE_MIN_REMAINING then
 		-- The match had more than 2 players before this elimination, so let the
 		-- eliminated player pick LEAVE / RESPAWN.
-		self:_promptEliminationChoice(player)
+		self:_promptEliminationChoice(player, revengePasser)
 	else
 		-- The match had 2 or fewer players before this elimination, so skip the
 		-- prompt and auto-return to lobby after a short ragdoll moment.
@@ -645,6 +707,7 @@ function RoundManager:_returnToLobby(player: Player)
 
 	RagdollManager:Unragdoll(player)
 	resetPlayerMovement(player)
+	restorePlayerHealth(player)
 
 	local character = player.Character
 	local lobbySpawn = workspace:FindFirstChild("Spawn")
@@ -731,7 +794,7 @@ function RoundManager:_respawnIntoMatch(player: Player): boolean
 	return true
 end
 
-function RoundManager:_promptEliminationChoice(player: Player)
+function RoundManager:_promptEliminationChoice(player: Player, revengePasser: Player?)
 	-- Cancel any prior pending entry (shouldn't happen, but be defensive).
 	local existing = self._pendingChoices[player]
 	if existing then
@@ -743,13 +806,23 @@ function RoundManager:_promptEliminationChoice(player: Player)
 		Thread: thread?,
 		PurchasePending: boolean?,
 		ProductId: string?,
+		RevengeTarget: Player?,
 	}
 	self._pendingChoices[player] = entry
+
+	-- Resolve the Revenge target: whoever last passed the bomb to this player,
+	-- provided they're still alive in the match.
+	local passer = revengePasser
+	if passer and not indexOf(self._alive, passer) then
+		passer = nil
+	end
+	entry.RevengeTarget = passer
 
 	local expirationTime = workspace:GetServerTimeNow() + GameConfigs.ELIMINATION_CHOICE_DURATION
 
 	self.EliminationChoicePromptEvent:Fire(player, {
 		ExpirationTime = expirationTime,
+		RevengeTarget = serializePlayer(passer),
 	})
 
 	entry.Thread = task.spawn(function()
@@ -867,6 +940,143 @@ function RoundManager:_handleRespawnProductPromptFinished(player: Player, produc
 	self:_resolveEliminationChoice(player, "Leave")
 end
 
+function RoundManager:_requestPaidRevenge(player: Player)
+	local entry = self._pendingChoices[player]
+	if not entry or entry.Resolved then
+		return
+	end
+
+	if entry.PurchasePending then
+		return
+	end
+
+	local target = entry.RevengeTarget
+	if not target or not indexOf(self._alive, target) then
+		return
+	end
+
+	entry.PurchasePending = true
+
+	local hasData, playerData = PlayerDataManager:GetPlayerData(player):await()
+	if not hasData then
+		warn(`[RoundManager] Revenge blocked for {player.Name}: player data was not available`)
+		entry = self._pendingChoices[player]
+		if entry then
+			entry.PurchasePending = false
+		end
+		return
+	end
+
+	entry = self._pendingChoices[player]
+	if not entry or entry.Resolved then
+		return
+	end
+
+	target = entry.RevengeTarget
+	if not target or not indexOf(self._alive, target) then
+		entry.PurchasePending = false
+		return
+	end
+
+	local firstRevengeExpiresAt = 0
+	if
+		typeof(playerData.FirstPurchaseOfTheDay) == "table"
+		and typeof(playerData.FirstPurchaseOfTheDay.Revenge) == "number"
+	then
+		firstRevengeExpiresAt = playerData.FirstPurchaseOfTheDay.Revenge
+	end
+
+	local productId = GameConfigs.REVENGE_PRODUCT_ID
+	if firstRevengeExpiresAt <= os.time() then
+		productId = GameConfigs.FIRST_REVENGE_PRODUCT_ID
+	end
+
+	local productData = Products.GetProductFromId(productId)
+	if not productData or not productData.ProductId or productData.ProductId <= 0 then
+		warn(`[RoundManager] Revenge product '{productId}' is not configured`)
+		entry.PurchasePending = false
+		return
+	end
+
+	entry.ProductId = productId
+	ShopManager:AttemptProductPurchase(player, productId)
+end
+
+function RoundManager:_handleRevengeProductPurchased(player: Player)
+	local entry = self._pendingChoices[player]
+
+	-- The buyer already left / the match ended before the purchase resolved.
+	-- We can't apply the revenge anymore, so just compensate them.
+	if not entry or entry.Resolved then
+		CurrencyManager:IncrementCurrency(player, GameConfigs.RESPAWN_COMPENSATION_REWARD, true)
+		NotificationManager.NotifyNormalEvent:Fire(player, {
+			`Your revenge could not be applied, so you received <font color="#ffd400">{GameConfigs.RESPAWN_COMPENSATION_REWARD} Coins</font> instead.`,
+			4,
+			"RobuxPurchase",
+		})
+		return
+	end
+
+	-- Revenge is consumed: keep the prompt open (they can still Respawn / Leave)
+	-- but hide the button client-side so they can't buy it again this round.
+	entry.PurchasePending = false
+	entry.ProductId = nil
+	local target = entry.RevengeTarget
+	entry.RevengeTarget = nil
+
+	if player:IsDescendantOf(Players) then
+		self.RevengeConsumedEvent:Fire(player)
+	end
+
+	if not target or not indexOf(self._alive, target) then
+		-- Target slipped away (left / already eliminated): compensate instead.
+		CurrencyManager:IncrementCurrency(player, GameConfigs.RESPAWN_COMPENSATION_REWARD, true)
+		NotificationManager.NotifyNormalEvent:Fire(player, {
+			`Your revenge target was no longer available, so you received <font color="#ffd400">{GameConfigs.RESPAWN_COMPENSATION_REWARD} Coins</font> instead.`,
+			4,
+			"RobuxPurchase",
+		})
+		return
+	end
+
+	-- Capture names before _eliminate ragdolls/removes the target.
+	local buyerName = player.DisplayName
+	local targetName = target.DisplayName
+
+	NotificationManager.NotifyNormalEvent:Fire(target, {
+		`<font color="#ff0000">{buyerName}</font> took revenge on you!`,
+		4,
+		"RobuxPurchase",
+	})
+	NotificationManager.NotifyNormalEvent:Fire(BridgeNet2.AllPlayers(), {
+		`<font color="#ffd400">{buyerName}</font> got revenge on <font color="#ff0000">{targetName}</font>!`,
+		4,
+		"RobuxPurchase",
+	})
+
+	self:_eliminate(target, true)
+end
+
+function RoundManager:_handleRevengeProductPromptFinished(player: Player, productId: string, wasPurchased: boolean)
+	local entry = self._pendingChoices[player]
+	if not entry or entry.Resolved then
+		return
+	end
+
+	if entry.ProductId and entry.ProductId ~= productId then
+		return
+	end
+
+	if wasPurchased then
+		return
+	end
+
+	-- Cancelling the revenge purchase keeps the buyer on the prompt; they can
+	-- still buy it again, Respawn, Leave, or let the timer run out.
+	entry.PurchasePending = false
+	entry.ProductId = nil
+end
+
 function RoundManager:_resolveEliminationChoice(player: Player, choice: string)
 	local entry = self._pendingChoices[player]
 	if not entry or entry.Resolved then
@@ -901,12 +1111,14 @@ function RoundManager:_handleEliminationChoiceRequest(player: Player, payload: a
 		choice = payload.Choice or payload.choice
 	end
 
-	if choice ~= "Respawn" and choice ~= "Leave" then
+	if choice ~= "Respawn" and choice ~= "Leave" and choice ~= "Revenge" then
 		return
 	end
 
 	if choice == "Respawn" then
 		self:_requestPaidRespawn(player)
+	elseif choice == "Revenge" then
+		self:_requestPaidRevenge(player)
 	else
 		self:_resolveEliminationChoice(player, choice)
 	end
@@ -947,39 +1159,8 @@ function RoundManager:_assignRandomBombHolder(): Player?
 
 	local picked = self._alive[math.random(1, #self._alive)]
 	BombManager:SetHolder(picked)
+	self._lastPasser[picked] = nil -- random assignment, nobody passed it to them
 	return picked
-end
-
-function RoundManager:_clearLockTarget(shouldNotify: boolean)
-	local target = self._lockTarget
-	self._lockTarget = nil
-	self._lockTargetExpiresAt = 0
-
-	if shouldNotify and target and NotificationManager then
-		NotificationManager.NotifyNormalEvent:Fire(
-			BridgeNet2.AllPlayers(),
-			`Lock Target on <font color="#ff0000">{target.Name}</font> is over`
-		)
-	end
-end
-
-function RoundManager:_getLockTarget(): Player?
-	local target = self._lockTarget
-	if not target then
-		return nil
-	end
-
-	if workspace:GetServerTimeNow() >= self._lockTargetExpiresAt then
-		self:_clearLockTarget(true)
-		return nil
-	end
-
-	if not self._matchActive or not target:IsDescendantOf(Players) or not indexOf(self._alive, target) then
-		self:_clearLockTarget(false)
-		return nil
-	end
-
-	return target
 end
 
 -- Resolves a pass target by direction, given the current alive list as the
@@ -1005,9 +1186,9 @@ function RoundManager:_resolvePassTarget(direction: string): Player?
 		return nil
 	end
 
-	local lockTarget = self:_getLockTarget()
-	if lockTarget then
-		return lockTarget
+	local override = self:_resolveHook("ResolvePassTarget", holder, direction)
+	if override then
+		return override
 	end
 
 	local targetIdx
@@ -1079,16 +1260,76 @@ function RoundManager:_handleBombPassRequest(player: Player, payload: any)
 	self._lastPassAt = now
 
 	local from = player
-	if self:_consumeShield(target, from) then
+	if self:_resolveHook("PrePass", from, target) then
 		return
 	end
 
-	BombManager:SetHolder(target)
-	self.OnBombPassed:Fire(from, target, direction)
+	self:PassBomb(from, target, direction)
 
-	if self:_consumeReflect(target, from) then
+	if self:_resolveHook("PostPass", from, target) then
 		return
 	end
+end
+
+----------------------------------------------------------------
+-- Ability-facing round API
+--
+-- Generic primitives abilities call through the `Round` dep. RoundManager owns
+-- the round/timer state; abilities own their own state and drive it through here.
+----------------------------------------------------------------
+
+function RoundManager:GetBombHolder(): Player?
+	return BombManager and BombManager:GetHolder() or nil
+end
+
+-- Hands the bomb from one player to another: sets the holder, records who passed
+-- it (for Revenge), and fires OnBombPassed. Used by the normal pass path and by
+-- abilities that re-route the bomb (e.g. Reflect).
+function RoundManager:PassBomb(from: Player, to: Player, direction: string)
+	if not BombManager then
+		return
+	end
+
+	BombManager:SetHolder(to)
+	self._lastPasser[to] = from
+	self.OnBombPassed:Fire(from, to, direction)
+end
+
+function RoundManager:Eliminate(player: Player, suppressChoicePrompt: boolean?)
+	self:_eliminate(player, suppressChoicePrompt)
+end
+
+function RoundManager:SetExplosionTimestamp(timestamp: number)
+	self._explosionTimestamp = timestamp
+	self:_publishExplosionTimestamp()
+end
+
+function RoundManager:IsMusicPlaying(): boolean
+	return not self._passesLocked and self._explosionTimestamp > workspace:GetServerTimeNow()
+end
+
+-- Forces the music/explosion timer to a fixed duration and replicates it to
+-- clients without firing OnMusicCycleStarted (used by abilities like Nuke).
+function RoundManager:ForceMusicTimer(duration: number)
+	self._musicDuration = duration
+	self._explosionTimestamp = workspace:GetServerTimeNow() + duration
+	self:_publishExplosionTimestamp()
+	self.SyncExplosionTimeEvent:Fire(BridgeNet2.AllPlayers(), {
+		Timestamp = self._explosionTimestamp,
+		Duration = duration,
+	})
+end
+
+function RoundManager:SetPassesLocked(isLocked: boolean)
+	self._passesLocked = isLocked
+end
+
+function RoundManager:ArePassesLocked(): boolean
+	return self._passesLocked
+end
+
+function RoundManager:SetSuppressNextMusicStop(shouldSuppress: boolean)
+	self._suppressNextMusicStop = shouldSuppress
 end
 
 ----------------------------------------------------------------
@@ -1131,200 +1372,6 @@ function RoundManager:GetAlivePlayers(): { Player }
 		table.insert(alive, player)
 	end
 	return alive
-end
-
-function RoundManager:ActivateShield(player: Player): boolean
-	if not self:IsPlayerInActiveMatch(player) then
-		return false
-	end
-
-	if self._activeShields[player] then
-		NotificationManager.NotifyNormalEvent:Fire(player, { "Shield is already active.", 3, "Reject" })
-		return false
-	end
-
-	self._activeShields[player] = true
-	return true
-end
-
-function RoundManager:ActivateReflect(player: Player): boolean
-	if not self:IsPlayerInActiveMatch(player) then
-		return false
-	end
-
-	if self._activeReflects[player] then
-		NotificationManager.NotifyNormalEvent:Fire(player, { "Reflect is already active.", 3, "Reject" })
-		return false
-	end
-
-	self._activeReflects[player] = true
-	return true
-end
-
-function RoundManager:ActivateStopMusic(player: Player): boolean
-	if not self:IsPlayerInActiveMatch(player) then
-		return false
-	end
-
-	if self._passesLocked or self._explosionTimestamp <= workspace:GetServerTimeNow() then
-		NotificationManager.NotifyNormalEvent:Fire(player, { "Music is not currently playing.", 3, "Reject" })
-		return false
-	end
-
-	self._explosionTimestamp = workspace:GetServerTimeNow()
-	self:_publishExplosionTimestamp()
-	return true
-end
-
-function RoundManager:ActivateNuke(player: Player): boolean
-	if not self:IsPlayerInActiveMatch(player) then
-		return false
-	end
-
-	if self._passesLocked or self._explosionTimestamp <= workspace:GetServerTimeNow() then
-		NotificationManager.NotifyNormalEvent:Fire(player, { "Nuke cannot be used right now.", 3, "Reject" })
-		return false
-	end
-
-	if self._nukeActive then
-		NotificationManager.NotifyNormalEvent:Fire(player, { "A nuke is already active.", 3, "Reject" })
-		return false
-	end
-
-	if #self._alive <= 1 then
-		return false
-	end
-
-	self._nukeActive = true
-	self._passesLocked = true
-
-	local timerLockDuration = GameConfigs.NUKE_TIMER_LOCK_DURATION
-	self._musicDuration = timerLockDuration
-	self._explosionTimestamp = workspace:GetServerTimeNow() + timerLockDuration
-	self:_publishExplosionTimestamp()
-	self.SyncExplosionTimeEvent:Fire(BridgeNet2.AllPlayers(), {
-		Timestamp = self._explosionTimestamp,
-		Duration = timerLockDuration,
-	})
-
-	EffectManager.RunEffect:Fire(BridgeNet2.AllPlayers(), { "Nuke" })
-
-	task.delay(GameConfigs.NUKE_EFFECT_DELAY, function()
-		if not self._nukeActive then
-			return
-		end
-
-		self._nukeActive = false
-
-		if not self:IsMatchActive() then
-			self._passesLocked = false
-			return
-		end
-
-		if not self:IsPlayerAlive(player) then
-			self._passesLocked = false
-			return
-		end
-
-		local victims = {}
-		for _, alivePlayer in self._alive do
-			if alivePlayer ~= player then
-				table.insert(victims, alivePlayer)
-			end
-		end
-
-		for _, victim in victims do
-			if self:IsPlayerAlive(victim) then
-				self:_eliminate(victim, true)
-			end
-		end
-
-		if #self._alive <= 1 then
-			self._suppressNextMusicStop = true
-		end
-
-		self._passesLocked = false
-	end)
-
-	return true
-end
-
-function RoundManager:ActivateLockTarget(player: Player, target: Player, duration: number?): boolean
-	if not BombManager then
-		return false
-	end
-
-	if not self:IsPlayerInActiveMatch(player) or not self:IsPlayerInActiveMatch(target) then
-		return false
-	end
-
-	if player == target then
-		NotificationManager.NotifyNormalEvent:Fire(player, { "Select another player.", 3, "Reject" })
-		return false
-	end
-
-	if self._passesLocked then
-		NotificationManager.NotifyNormalEvent:Fire(player, { "The bomb cannot be retargeted right now.", 3, "Reject" })
-		return false
-	end
-
-	local lockDuration = type(duration) == "number" and duration > 0 and duration
-
-	self._lockTarget = target
-	self._lockTargetExpiresAt = workspace:GetServerTimeNow() + lockDuration
-	local expiresAt = self._lockTargetExpiresAt
-
-	NotificationManager.NotifyNormalEvent:Fire(
-		BridgeNet2.AllPlayers(),
-		`The bomb will target <font color="#ff0000">{target.Name}</font> for <font color="#55ff00">{lockDuration}</font> seconds`
-	)
-
-	task.delay(lockDuration, function()
-		if self._lockTarget == target and self._lockTargetExpiresAt == expiresAt then
-			self:_clearLockTarget(true)
-		end
-	end)
-
-	return true
-end
-
-function RoundManager:_consumeShield(target: Player, from: Player): boolean
-	if not self._activeShields[target] then
-		return false
-	end
-
-	self._activeShields[target] = nil
-
-	NotificationManager.NotifyNormalEvent:Fire(
-		BridgeNet2.AllPlayers(),
-		`<font color="#55ff00">{target.Name}</font> blocked <font color="#ff0000">{from.Name}</font>'s pass`
-	)
-
-	return true
-end
-
-function RoundManager:_consumeReflect(target: Player, from: Player): boolean
-	if not self._activeReflects[target] then
-		return false
-	end
-
-	if not indexOf(self._alive, from) then
-		self._activeReflects[target] = nil
-		return false
-	end
-
-	self._activeReflects[target] = nil
-
-	task.wait(0.15)
-	BombManager:SetHolder(from)
-
-	NotificationManager.NotifyNormalEvent:Fire(
-		BridgeNet2.AllPlayers(),
-		`<font color="#55ff00">{target.Name}</font> reflected the bomb back to <font color="#ff0000">{from.Name}</font>`
-	)
-
-	self.OnBombPassed:Fire(target, from, "Reflect")
-	return true
 end
 
 ----------------------------------------------------------------
@@ -1428,6 +1475,10 @@ function RoundManager:_startLastRoundBrawl()
 		return
 	end
 
+	-- The final round is starting; resolve anyone still sitting in the long
+	-- elimination-choice prompt so they don't linger on screen during the brawl.
+	self:_clearAllPendingChoices()
+
 	self._lastRoundActive = true
 	self._lastRoundResolved = false
 	self._passesLocked = true
@@ -1508,11 +1559,8 @@ function RoundManager:StartMatch(): boolean
 	self._matchActive = false
 	self._passesLocked = false
 	self._lastPassAt = 0
-	self._activeShields = {}
-	self._activeReflects = {}
-	self._nukeActive = false
 	self._suppressNextMusicStop = false
-	self:_clearLockTarget(false)
+	self:_fireHook("MatchReset")
 	self._eliminationBoardTitle.Text = ""
 	self:_resetLastRoundArena()
 
@@ -1633,7 +1681,9 @@ function RoundManager:RunMatchLoop()
 				task.wait(GameConfigs.PRE_ELIMINATION_GRACE)
 
 				if indexOf(self._alive, victim) then
-					-- Still present: eliminate normally.
+					-- Still present: fire the pre-eliminate hook (e.g. Giant Bomb
+					-- blasts the flanking players) before eliminating the holder.
+					self:_fireHook("HolderPreEliminate", victim)
 					self:_eliminate(victim)
 					victimEliminated = true
 				else
@@ -1726,8 +1776,10 @@ function RoundManager:FinalizeMatch()
 		table.insert(self._placements, 1, winner.UserId)
 		self._eliminationBoardTitle.Text = `<font color="#ffd400">{winner.Name:upper()} HAS WON THE GAME</font>`
 
-		-- Restore winner's movement so they can walk around during celebration
+		-- Restore winner's movement + health so they walk around the celebration
+		-- at full HP (e.g. after surviving a Fire Bomb burn).
 		resetPlayerMovement(winner)
+		restorePlayerHealth(winner)
 
 		CurrencyManager:IncrementCurrency(winner, GameConfigs.WINNER_REWARD, true)
 
@@ -1764,11 +1816,8 @@ function RoundManager:FinalizeMatch()
 
 	-- Cleanup state for next match
 	self._alive = {}
-	self._activeShields = {}
-	self._activeReflects = {}
-	self._nukeActive = false
 	self._suppressNextMusicStop = false
-	self:_clearLockTarget(false)
+	self:_fireHook("MatchReset")
 	self:_resetLastRoundArena()
 	self._eliminationBoardTitle.Text = ""
 	self:_publishAliveList()
@@ -1782,11 +1831,7 @@ end
 ----------------------------------------------------------------
 
 function RoundManager:_onPlayerLeaving(player: Player)
-	self._activeShields[player] = nil
-	self._activeReflects[player] = nil
-	if self._lockTarget == player then
-		self:_clearLockTarget(false)
-	end
+	self:_fireHook("PlayerRemoved", player)
 
 	-- Clear any pending choice prompt for the leaving player. No teleport
 	-- needed since their character is about to be destroyed anyway.
@@ -1859,6 +1904,64 @@ function RoundManager:_onPlayerLeaving(player: Player)
 		return
 	end
 
+	if wasHolder then
+		self:_assignRandomBombHolder()
+	end
+end
+
+-- Safety net for a player whose Humanoid actually dies (Health <= 0) from
+-- something other than the bomb timer — e.g. the new health-deduction mechanic,
+-- the bat, or the void. The normal flow only eliminates the bomb holder when the
+-- music timer expires, so without this an unexpected death would leave a "ghost"
+-- in self._alive (still counted, possibly still holding the bomb).
+--
+-- Routes the death through _eliminate (placement, survivor rewards, VFX,
+-- elimination/respawn prompt) and then performs the same post-elimination world
+-- reaction the disconnect handler does, since a death lands outside the match
+-- loop's timer branch. No PRE_ELIMINATION grace — the player is already dead, so
+-- there are no pre-death effects to play.
+function RoundManager:_onPlayerDied(player: Player)
+	-- Only react to deaths of a player still alive in an active match. Lobby
+	-- deaths and deaths of already-eliminated players are left to Roblox's
+	-- normal respawn.
+	if not self._matchActive or not indexOf(self._alive, player) then
+		return
+	end
+
+	-- Capture holder status before _eliminate clears it.
+	local wasHolder = BombManager and BombManager:GetHolder() == player
+
+	self:_eliminate(player)
+
+	if #self._alive <= 1 then
+		-- RunMatchLoop will detect this and exit into MatchEnd.
+		self._suppressNextMusicStop = true
+		if self._lastRoundActive then
+			self:_endLastRound()
+			self:_setLastRoundHitPartVisible(false)
+		end
+		return
+	end
+
+	-- Re-arrange survivors into a fresh circle after the death.
+	self:_teleportPlayersToCircle()
+
+	if #self._alive == 2 then
+		self.PostEliminationEvent:Fire(BridgeNet2.AllPlayers(), {
+			RemainingCount = #self._alive,
+		})
+
+		self._passesLocked = true
+		self._suppressNextMusicStop = true
+		self:_stopMusicCycle(true)
+		if BombManager then
+			BombManager:SetHolder(nil)
+		end
+		return
+	end
+
+	-- Keep the current music cycle running; just hand the orphaned bomb to a
+	-- random survivor so passes aren't dead until the timer expires.
 	if wasHolder then
 		self:_assignRandomBombHolder()
 	end
@@ -2019,12 +2122,32 @@ function RoundManager:OnInit()
 end
 
 function RoundManager:OnStart()
+	-- Bind Humanoid.Died for every spawn so a real death (Health <= 0) routes
+	-- into _onPlayerDied instead of leaving a ghost in the match.
+	local function bindPlayerDeath(player: Player)
+		local function onCharacter(character: Model)
+			local humanoid = character:WaitForChild("Humanoid", 5) :: Humanoid?
+			if humanoid then
+				humanoid.Died:Connect(function()
+					self:_onPlayerDied(player)
+				end)
+			end
+		end
+
+		if player.Character then
+			task.spawn(onCharacter, player.Character)
+		end
+		player.CharacterAdded:Connect(onCharacter)
+	end
+
 	for _, player in Players:GetPlayers() do
 		player:SetAttribute(PLAYER_IN_GAME_ATTRIBUTE, false)
+		bindPlayerDeath(player)
 	end
 
 	Players.PlayerAdded:Connect(function(player: Player)
 		player:SetAttribute(PLAYER_IN_GAME_ATTRIBUTE, false)
+		bindPlayerDeath(player)
 		if self:IsLastRoundActive() and self._lastRoundStartedPayload then
 			self.LastRoundStartedEvent:Fire(player, self._lastRoundStartedPayload)
 		end
@@ -2050,12 +2173,16 @@ function RoundManager:OnStart()
 	ShopManager.PlayerPurchased:Connect(function(player: Player, productId: string)
 		if isRespawnProductId(productId) then
 			self:_handleRespawnProductPurchased(player)
+		elseif isRevengeProductId(productId) then
+			self:_handleRevengeProductPurchased(player)
 		end
 	end)
 
 	ShopManager.ProductPromptFinished:Connect(function(player: Player, productId: string, wasPurchased: boolean)
 		if isRespawnProductId(productId) then
 			self:_handleRespawnProductPromptFinished(player, productId, wasPurchased)
+		elseif isRevengeProductId(productId) then
+			self:_handleRevengeProductPromptFinished(player, productId, wasPurchased)
 		end
 	end)
 

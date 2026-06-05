@@ -24,16 +24,16 @@ local GameConfigs = {
 	POST_RESET_DELAY = 3, -- seconds between elimination and re-circling / new music cycle (for client effects)
 
 	-- Elimination choice (LEAVE / RESPAWN prompt for the eliminated player)
-	ELIMINATION_CHOICE_DURATION = 10, -- seconds the eliminated player has to choose; defaults to LEAVE on timeout
+	ELIMINATION_CHOICE_DURATION = 30, -- seconds the eliminated player has to choose; defaults to LEAVE on timeout
 	ELIMINATION_CHOICE_MIN_REMAINING = 2, -- only prompt when the match had > 2 players before elim; otherwise auto-leave to lobby
 	ELIMINATION_AUTO_LOBBY_DELAY = 3, -- ragdoll-on-screen delay before auto-returning to lobby when no prompt is shown
 	FIRST_RESPAWN_PRODUCT_ID = "FirstRespawnOfTheDay", -- Products.Data id for the discounted first daily respawn developer product
 	RESPAWN_PRODUCT_ID = "Respawn", -- Products.Data id for the paid respawn developer product
+	FIRST_REVENGE_PRODUCT_ID = "FirstRevengeOfTheDay", -- Products.Data id for the discounted first daily revenge developer product
+	REVENGE_PRODUCT_ID = "Revenge", -- Products.Data id for the paid revenge developer product
 
 	-- Music / explosion timer
 	MUSIC_DURATION_RANGE = NumberRange.new(10, 18), -- min/max song length (seconds)
-	NUKE_TIMER_LOCK_DURATION = 600, -- keeps the normal bomb timer from expiring while the nuke effect plays
-	NUKE_EFFECT_DELAY = 2, -- seconds between the nuke effect firing and the mass elimination
 
 	-- Rewards
 	PARTICIPATION_REWARD = 10, -- given to all survivors when someone is eliminated
@@ -50,9 +50,10 @@ local GameConfigs = {
 	MATCH_WALKSPEED = 0, -- applied to all participants while the match is active
 	MATCH_JUMPPOWER = 0,
 
-	-- Bomb skin shop
-	BOMB_SKIN_SHOP_INTERVAL = 24 * 60 * 60, -- seconds between bomb skin shop re-rolls
-	BOMB_SKIN_SHOP_AMOUNT = 8, -- number of random skins shown in the shop displays
+	-- Skin shops (bomb + bat re-roll together off this shared interval)
+	SKIN_SHOP_INTERVAL = 12 * 60 * 60, -- seconds between skin shop re-rolls
+	BOMB_SKIN_SHOP_AMOUNT = 8, -- number of random bomb skins shown in the shop displays
+	BAT_SKIN_SHOP_AMOUNT = 6, -- number of random bat skins shown in the shop displays
 
 	-- Bomb passing
 	PASS_COOLDOWN = 0.1, -- seconds between accepted pass attempts

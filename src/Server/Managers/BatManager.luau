@@ -8,6 +8,10 @@ local Debris = game:GetService("Debris")
 local Packages = ReplicatedStorage.Packages
 local BridgeNet2 = require(Packages.BridgeNet2)
 
+-- Shared
+local Shared = ReplicatedStorage.Shared
+local BatSkins = require(Shared.Config.BatSkins)
+
 -- Assets
 local Assets = ReplicatedStorage.Assets
 
@@ -15,6 +19,7 @@ local Assets = ReplicatedStorage.Assets
 local TOOL_NAME = "BaseballBat"
 local COMPONENT_TAG = "Bat"
 local OWNER_ATTRIBUTE = "OwnerId"
+local EQUIPPED_SKIN_ATTRIBUTE = "EquippedBatSkin"
 local REQUEST_COOLDOWN = 0.1
 local VALID_RANGE = 8
 local MIN_FORWARD_DOT = 0.2
@@ -123,14 +128,29 @@ function BatManager:_removePlayerTool(player: Player)
 	end
 end
 
+-- Resolves the bat tool template for the player's equipped bat skin. Skin tools
+-- are full drop-in bats (same Handle/attachment setup), so we just clone the
+-- equipped one; falls back to the default BaseballBat tool.
+function BatManager:_resolveToolTemplate(player: Player): Tool?
+	local skinId = player:GetAttribute(EQUIPPED_SKIN_ATTRIBUTE)
+	if skinId and skinId ~= "Default" then
+		local skinData = BatSkins.GetBatFromId(skinId)
+		if skinData and skinData.Model and skinData.Model:IsA("Tool") then
+			return skinData.Model
+		end
+	end
+
+	local toolsFolder = Assets:FindFirstChild("Tools")
+	return toolsFolder and toolsFolder:FindFirstChild(TOOL_NAME) :: Tool?
+end
+
 -- Gives and equips the final-round bat tool.
 function BatManager:_givePlayerTool(player: Player)
 	self:_removePlayerTool(player)
 
-	local toolsFolder = Assets:FindFirstChild("Tools")
-	local toolTemplate = toolsFolder and toolsFolder:FindFirstChild(TOOL_NAME)
+	local toolTemplate = self:_resolveToolTemplate(player)
 	if not toolTemplate or not toolTemplate:IsA("Tool") then
-		warn("[BatManager] ReplicatedStorage.Assets.Tools.BaseballBat is missing")
+		warn("[BatManager] No bat tool template available (missing BaseballBat / skin)")
 		return
 	end
 
@@ -140,6 +160,7 @@ function BatManager:_givePlayerTool(player: Player)
 	end
 
 	local batTool = toolTemplate:Clone()
+	batTool.Name = TOOL_NAME
 	batTool:SetAttribute(OWNER_ATTRIBUTE, player.UserId)
 	batTool:AddTag(COMPONENT_TAG)
 	batTool.Parent = backpack

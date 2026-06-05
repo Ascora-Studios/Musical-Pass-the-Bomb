@@ -47,17 +47,23 @@ function AnimationController:_initAnimations()
 		animation.Name = animationName
 		animation.AnimationId = animatiodId
 
-		local animationTrack = character.Humanoid.Animator:LoadAnimation(animation)
+		local humanoid = character:WaitForChild("Humanoid", 5)
+		if not humanoid then
+			warn("Humanoid not found for animation:", animationName)
+			continue
+		end
+
+		local animationTrack = humanoid.Animator:LoadAnimation(animation)
 		self._animationTracks[animationName] = animationTrack
 	end
 end
 
 function AnimationController:OnInit()
 	LocalPlayer.CharacterAdded:Connect(function()
-		self:_initAnimations()
+		task.spawn(AnimationController._initAnimations, self)
 	end)
 
-	self:_initAnimations()
+	task.spawn(AnimationController._initAnimations, self)
 end
 
 return AnimationController

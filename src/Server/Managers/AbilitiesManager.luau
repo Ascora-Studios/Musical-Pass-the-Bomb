@@ -18,6 +18,7 @@ local ShopManager
 local CurrencyManager
 local RoundManager
 local SelectPlayerManager
+local EffectManager
 
 local REQUEST_THROTTLE_SECONDS = 0.35
 local REQUEST_THROTTLE_NOTIFY_SECONDS = 1.5
@@ -397,11 +398,9 @@ function AbilitiesManager:_runAbility(player: Player, ability: string, abilityEn
 		end
 	end
 
-	local result = abilityEntry.Server(player, alivePlayers, {
+	local result = abilityEntry.Server.Activate(player, {
 		Ability = ability,
 		Config = abilityConfig,
-		RoundManager = RoundManager,
-		SelectPlayerManager = SelectPlayerManager,
 		SelectedPlayer = selectedPlayer,
 	})
 	if result == false then
@@ -542,6 +541,7 @@ function AbilitiesManager:OnInit()
 	CurrencyManager = require(script.Parent.CurrencyManager)
 	RoundManager = require(script.Parent.RoundManager)
 	SelectPlayerManager = require(script.Parent.SelectPlayerManager)
+	EffectManager = require(script.Parent.EffectManager)
 
 	for _, ability in AbilitiesModules:GetChildren() do
 		self._abilities[ability.Name] = {
@@ -553,6 +553,26 @@ end
 
 -- Connects client bridge requests and Robux purchase completion callbacks.
 function AbilitiesManager:OnStart()
+	-- Hand each ability its dependencies once so it can register round hooks and
+	-- drive the match through RoundManager's generic API. Abilities own their own
+	-- state; RoundManager never references them by name.
+	local abilityDeps = {
+		Round = RoundManager,
+		Notify = function(target: any, payload: any)
+			NotificationManager.NotifyNormalEvent:Fire(target, payload)
+		end,
+		RunEffect = function(payload: any)
+			EffectManager.RunEffect:Fire(BridgeNet2.AllPlayers(), payload)
+		end,
+		AllPlayers = BridgeNet2.AllPlayers(),
+	}
+
+	for _, entry in self._abilities do
+		if entry.Server.Setup then
+			entry.Server.Setup(abilityDeps)
+		end
+	end
+
 	self.UseAbilityEvent:Connect(function(player: Player, abilityPayload: any)
 		self:UseAbility(player, abilityPayload)
 	end)

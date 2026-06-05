@@ -11,6 +11,10 @@ return {
 		OwnedBombSkins = { Default = true },
 		EquippedBombSkin = "Default",
 
+		-- Bat Skins
+		OwnedBatSkins = { Default = true },
+		EquippedBatSkin = "Default",
+
 		-- Core Shop Stuff
 		StarterPackStart = 0,
 		PurchasedOnceProducts = {},

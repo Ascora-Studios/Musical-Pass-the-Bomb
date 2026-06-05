@@ -103,6 +103,30 @@ Products.Data = {
 		end,
 	},
 
+	{
+		Id = "Revenge",
+		Name = "Revenge",
+		Type = "Core",
+		Description = "Eliminate whoever passed you the bomb.",
+		PurchaseOnce = false,
+		ProductId = 3602833892,
+	},
+
+	{
+		Id = "FirstRevengeOfTheDay",
+		Name = "First Revenge of the Day",
+		Type = "Core",
+		PurchaseOnce = false,
+		ProductId = 3602833851,
+		Callback = function(player: Player)
+			if RunService:IsClient() then
+				return
+			end
+
+			PlayerDataManager:SetPlayerDataKey(player, { "FirstPurchaseOfTheDay", "Revenge" }, os.time() + 24 * 60 * 60)
+		end,
+	},
+
 	------------ [[ Abilities ]] -------------
 	{
 		Id = "Nuke",

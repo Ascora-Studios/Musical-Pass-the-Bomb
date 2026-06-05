@@ -35,7 +35,7 @@ function OverheadUIManager:_attachUI(player: Player)
 		local character = player.Character
 		local humanoid = character.Humanoid
 
-		humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+		humanoid.NameDisplayDistance = 0
 
 		local characterSize = character:GetExtentsSize()
 		overheadUI.StudsOffset = Vector3.new(0, (characterSize.Y / 2) - 0.5, 0)

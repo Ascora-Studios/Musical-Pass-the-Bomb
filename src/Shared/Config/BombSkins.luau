@@ -41,6 +41,7 @@ BombSkins.Data = {
 		Name = "Default",
 		Rarity = "Common",
 		Price = 0,
+		Hide = true,
 	},
 
 	{

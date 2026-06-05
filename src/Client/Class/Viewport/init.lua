@@ -89,7 +89,6 @@ function Viewport:_init()
 	if self._part:IsA("BasePart") then
 		local model = Instance.new("Model")
 		model.PrimaryPart = self._part
-		self._part.Orientation = Vector3.new(0, 0, 0)
 		self._part.Parent = model
 		self._part = model
 

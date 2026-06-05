@@ -17,7 +17,7 @@ return function()
 	end
 
 	local nuke = bomb:Clone()
-	nuke.CFrame = bomb.CFrame
+	nuke:PivotTo(bomb:GetPivot())
 	nuke.Parent = bomb.Parent
 
 	local highlight = Instance.new("Highlight")

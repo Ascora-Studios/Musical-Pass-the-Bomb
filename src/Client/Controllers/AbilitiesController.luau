@@ -32,6 +32,24 @@ local AbilitiesController = {
 	_abilities = {},
 }
 
+function AbilitiesController:ToggleDisplay(toggle: boolean)
+	local ui = self.UI
+	local display = ui.Display
+
+	Spr.target(display, 0.8, 2.5, { Position = toggle and UDim2.fromScale(0.94, 0.5) or UDim2.fromScale(1.2, 0.5) })
+end
+
+function AbilitiesController:ToggleUI(toggle: boolean)
+	local ui = self.UI
+	local holder = ui.Holder
+
+	if toggle then
+		UIController:OpenFrame(holder)
+	else
+		UIController:CloseFrame(holder)
+	end
+end
+
 function AbilitiesController:RequestAbilityPurchase(ability: string, selectedUserId: number?)
 	if type(ability) ~= "string" then
 		return
@@ -66,6 +84,7 @@ function AbilitiesController:_setupUI()
 	local ui = self.UI
 	local holder = ui.Holder
 	local container = holder.Container.ScrollingFrame
+	local display = ui.Display
 
 	local playerReplica
 
@@ -117,13 +136,40 @@ function AbilitiesController:_setupUI()
 		end, true, false, { ShowFrame = abilityTemplate.Holder })
 	end
 
+	for _, frame in display:GetChildren() do
+		if not frame:IsA("Frame") then
+			continue
+		end
+
+		local abilityName = frame.Name
+		local abilityModule = Abilities[abilityName]
+		local configFile = require(abilityModule.Config)
+
+		UIController:BindButtonClick(frame.Button, function()
+			if configFile.SelectPlayer and LocalPlayer:GetAttribute("InGame") == true then
+				SelectPlayerController:OpenForAbility(frame.Name, function(selectedUserId: number)
+					requestAbility(frame.Name, selectedUserId)
+				end)
+				return
+			end
+
+			requestAbility(frame.Name)
+		end, true, false, { ShowFrame = frame })
+	end
+
 	-- Update the abilities
 	local function updateAbilities()
 		for _, ability in Abilities:GetChildren() do
 			local abilityTemplate = container:FindFirstChild(ability.Name)
+			local ownedAmount = playerReplica.Data.Abilities[ability.Name] or 0
+
 			if abilityTemplate then
-				local ownedAmount = playerReplica.Data.Abilities[ability.Name] or 0
 				abilityTemplate.Holder.Amount.Text = `x{ownedAmount}`
+			end
+
+			local displayFrame = display:FindFirstChild(ability.Name)
+			if displayFrame then
+				displayFrame.Amount.Text = `x{ownedAmount}`
 			end
 		end
 	end

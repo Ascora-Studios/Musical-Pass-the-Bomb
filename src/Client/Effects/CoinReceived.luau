@@ -48,7 +48,7 @@ return function(player)
 	end)
 
 	if player == LocalPlayer then
-		SoundController:PlaySound("ReceivedCoins")
+		SoundController:PlaySound("ReceivedCoins", nil, { PlaybackSpeed = Random.new():NextNumber(0.9, 1.1) })
 	else
 		SoundController:PlaySound("ReceivedCoins", rootPart.Position)
 	end

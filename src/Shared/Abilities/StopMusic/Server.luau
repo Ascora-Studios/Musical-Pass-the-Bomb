@@ -1,8 +1,26 @@
-return function(player: Player, _alivePlayers: { Player }, context: { [string]: any })
-	local roundManager = context.RoundManager
-	if not roundManager or not roundManager.ActivateStopMusic then
+local StopMusic = {}
+
+local round
+local notify
+
+function StopMusic.Setup(deps)
+	round = deps.Round
+	notify = deps.Notify
+end
+
+function StopMusic.Activate(player: Player): boolean
+	if not round:IsPlayerInActiveMatch(player) then
 		return false
 	end
 
-	return roundManager:ActivateStopMusic(player)
+	if not round:IsMusicPlaying() then
+		notify(player, { "Music is not currently playing.", 3, "Reject" })
+		return false
+	end
+
+	-- Snap the explosion to now so the current cycle ends immediately.
+	round:SetExplosionTimestamp(workspace:GetServerTimeNow())
+	return true
 end
+
+return StopMusic

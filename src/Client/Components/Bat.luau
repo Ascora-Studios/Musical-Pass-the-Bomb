@@ -1,5 +1,7 @@
 -- Services
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 local Players = game:GetService("Players")
 
 -- Packages
@@ -35,6 +37,8 @@ function Bat:Construct()
 	self._setCooldownEndsAt = 0
 	self._swingCount = 0
 
+	local isEquipped = false
+
 	local ownerId = self.Instance:GetAttribute("OwnerId")
 
 	if ownerId and ownerId ~= LocalPlayer.UserId then
@@ -67,19 +71,64 @@ function Bat:Construct()
 		end
 	end)
 
+	local function lockCamera()
+		isEquipped = true
+		UserInputService.MouseIconEnabled = false
+		UserInputService.MouseBehavior = UserInputService.TouchEnabled and Enum.MouseBehavior.Default
+			or Enum.MouseBehavior.LockCenter
+
+		local humanoid = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			humanoid.AutoRotate = false
+		end
+	end
+
+	local function unlockCamera()
+		isEquipped = false
+		UserInputService.MouseIconEnabled = true
+		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+
+		local humanoid = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			humanoid.AutoRotate = true
+		end
+	end
+
 	AnimationController:PlayAnimation("BatIdle")
 	self._cleaner:Add(self.Instance.Equipped:Connect(function()
 		AnimationController:PlayAnimation("BatIdle")
+		lockCamera()
 	end))
 
 	self._cleaner:Add(self.Instance.Unequipped:Connect(function()
 		AnimationController:StopAnimation("BatIdle")
 		hitbox:HitStop()
+		unlockCamera()
 	end))
 
 	self._cleaner:Add(function()
 		AnimationController:StopAnimation("BatIdle")
+		unlockCamera()
 	end)
+
+	self._cleaner:Add(RunService.RenderStepped:Connect(function(dt)
+		if not isEquipped then
+			return
+		end
+
+		local character = LocalPlayer.Character
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+		if not root then
+			return
+		end
+
+		local look = workspace.CurrentCamera.CFrame.LookVector
+		local flat = Vector3.new(look.X, 0, look.Z)
+		if flat.Magnitude > 0.01 then
+			local desired = CFrame.lookAt(root.Position, root.Position + flat)
+			root.CFrame = root.CFrame:Lerp(desired, 0.25 * dt * 60)
+		end
+	end))
 
 	self._cleaner:Add(self.Instance.Activated:Connect(function()
 		local now = os.clock()
