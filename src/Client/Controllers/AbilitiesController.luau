@@ -21,6 +21,7 @@ local HudController
 local ShopController
 local UIController
 local SelectPlayerController
+local RoundController
 
 --
 local AbilitiesController = {
@@ -30,6 +31,9 @@ local AbilitiesController = {
 	RequestAbilityPurchaseEvent = BridgeNet2.ReferenceBridge("RequestAbilityPurchase"),
 
 	_abilities = {},
+	_timerRevealActive = false,
+	_timerRevealThread = nil :: thread?,
+	_timerRevealConnections = {},
 }
 
 function AbilitiesController:ToggleDisplay(toggle: boolean)
@@ -48,6 +52,70 @@ function AbilitiesController:ToggleUI(toggle: boolean)
 	else
 		UIController:CloseFrame(holder)
 	end
+end
+
+function AbilitiesController:OpenTimerReveal()
+	if self._timerRevealActive then
+		return
+	end
+	self._timerRevealActive = true
+
+	local frame = self.TimeStopFrame
+	local countdown = frame.Countdown
+
+	UIController:OpenFrame(frame, true)
+
+	self._timerRevealThread = task.spawn(function()
+		local started = false
+
+		while true do
+			local timeLeft = RoundController:GetTimeUntilExplosion()
+
+			if timeLeft > 0 then
+				started = true
+				countdown.Text = string.format("%05.2f", timeLeft)
+				countdown.TextColor3 = timeLeft < 3 and Color3.fromRGB(255, 50, 50) or Color3.fromRGB(255, 255, 255)
+			elseif started then
+				-- The timer reached zero (bomb exploded / music stopped) — the
+				-- revealed cycle is over, so close the vision. Clear the reference
+				-- first so :_closeTimerReveal doesn't try to cancel this thread.
+				countdown.Text = string.format("%05.2f", 0)
+				self._timerRevealThread = nil
+				self:_closeTimerReveal()
+				return
+			else
+				-- Bought during the gap between cycles; hold until the next timer.
+				countdown.Text = string.format("%05.2f", 0)
+				countdown.TextColor3 = Color3.fromRGB(255, 50, 50)
+			end
+
+			task.wait()
+		end
+	end)
+
+	-- Close if the match ends while the vision is still open.
+	table.insert(self._timerRevealConnections, RoundController.OnMatchEndSignal:Connect(function()
+		self:_closeTimerReveal()
+	end))
+end
+
+function AbilitiesController:_closeTimerReveal()
+	if not self._timerRevealActive then
+		return
+	end
+	self._timerRevealActive = false
+
+	if self._timerRevealThread then
+		task.cancel(self._timerRevealThread)
+		self._timerRevealThread = nil
+	end
+
+	for _, connection in self._timerRevealConnections do
+		connection:Disconnect()
+	end
+	table.clear(self._timerRevealConnections)
+
+	UIController:CloseFrame(self.TimeStopFrame)
 end
 
 function AbilitiesController:RequestAbilityPurchase(ability: string, selectedUserId: number?)
@@ -203,8 +271,10 @@ function AbilitiesController:OnInit()
 	UIController = require(script.Parent.UIController)
 	HudController = require(script.Parent.HudController)
 	SelectPlayerController = require(script.Parent.SelectPlayerController)
+	RoundController = require(script.Parent.RoundController)
 
 	self.UI = PlayerGui:WaitForChild("AbilitiesUI")
+	self.TimeStopFrame = self.UI.TimeStop
 
 	for _, ability in Abilities:GetChildren() do
 		self._abilities[ability.Name] = require(ability.Client)
@@ -215,6 +285,10 @@ function AbilitiesController:OnStart()
 	self.UseAbilityEvent:Connect(function(data)
 		local ability = data[1]
 		local role = data[2]
+
+		if ability == "TimerReveal" and role == "Activator" then
+			self:OpenTimerReveal()
+		end
 
 		local abilityModule = self._abilities[ability]
 		if not abilityModule then

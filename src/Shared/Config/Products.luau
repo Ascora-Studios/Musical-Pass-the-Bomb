@@ -134,6 +134,12 @@ Products.Data = {
 		ProductId = 3585877108,
 	},
 
+	{
+		Id = "TimerReveal",
+		Name = "Music Countdown",
+		ProductId = 3603040531,
+	},
+
 	------------ [[ Currency ]] -------------
 	{
 		Id = "CoinPack1",
