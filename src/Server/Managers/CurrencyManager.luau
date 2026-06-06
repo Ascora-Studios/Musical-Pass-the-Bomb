@@ -1,3 +1,7 @@
+-- Services
+local Players = game:GetService("Players")
+local TextChatService = game:GetService("TextChatService")
+
 --
 local PlayerDataManager
 
@@ -43,6 +47,24 @@ end
 function CurrencyManager:OnInit()
 	--
 	PlayerDataManager = require(script.Parent.PlayerDataManager)
+end
+
+function CurrencyManager:OnStart()
+	--[[-- TEMP: dev command for testing currency, e.g. "/givemoney 5000"
+	local command = Instance.new("TextChatCommand")
+	command.Name = "GiveMoneyCommand"
+	command.PrimaryAlias = "/givemoney"
+	command.Parent = TextChatService
+
+	command.Triggered:Connect(function(textSource, message)
+		local player = Players:GetPlayerByUserId(textSource.UserId)
+		if not player then
+			return
+		end
+
+		local amount = tonumber(string.match(message, "(%-?%d+)")) or 1000
+		self:IncrementCurrency(player, amount, true)
+	end)]]
 end
 
 return CurrencyManager
