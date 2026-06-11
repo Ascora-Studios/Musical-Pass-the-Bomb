@@ -56,7 +56,7 @@ local GameConfigs = {
 	BAT_SKIN_SHOP_AMOUNT = 6, -- number of random bat skins shown in the shop displays
 
 	-- Bomb passing
-	PASS_COOLDOWN = 0.1, -- seconds between accepted pass attempts
+	PASS_COOLDOWN = 0.001, -- seconds between accepted pass attempts
 	VALID_PASS_DIRECTIONS = {
 		Left = true,
 		Right = true,
